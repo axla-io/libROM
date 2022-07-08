@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
     Mesh* mesh = new Mesh(mesh_file, 1, 1);
     int dim = mesh->Dimension();
 
+    /*
     if (mesh->attributes.Max() < 2 || mesh->bdr_attributes.Max() < 2)
     {
         if (myid == 0)
@@ -126,6 +127,8 @@ int main(int argc, char* argv[])
             << endl;
         return 3;
     }
+    */
+    
 
 
 
