@@ -140,7 +140,9 @@ if (USE_MFEM)
     parametric_heat_conduction
     dg_euler
     local_tw_csv
-    parametric_tw_csv)
+    parametric_tw_csv
+    simple_cwrom_groundtruth
+    simple_cwrom)
   set(example_directories
     prom
     prom
@@ -155,7 +157,9 @@ if (USE_MFEM)
     dmd
     dmd
     dmd
-    dmd)
+    dmd
+    cwrom
+    cwrom)
 
   list(LENGTH examples len1)
   math(EXPR len2 "${len1} - 1")

@@ -38,3 +38,4 @@ docs/html
 /.vs/CMake Overview
 /.vs/libROM-CWROM/FileContentIndex/920e8186-1e09-457d-8a5b-cf5d0306905d.vsidx
 *.vsidx
+*.db
