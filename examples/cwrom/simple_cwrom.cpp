@@ -70,29 +70,20 @@ int main(int argc, char* argv[])
     
     // 8a. Define a finite element space on the meshes
     FiniteElementCollection* fec1;
+    FiniteElementCollection* fec2;
+
     ParFiniteElementSpace* fespace1;
-    const bool use_nodal_fespace = pmesh1->NURBSext && !amg_elast;
-    if (use_nodal_fespace)
-    {
-        cout << "Test1";
-        fec1 = NULL;
-        fespace1 = (ParFiniteElementSpace*)pmesh1->GetNodes()->FESpace();
-    }
-    else
-    {
-        cout << "Test2";
-        fec1 = new H1_FECollection(order, dim);
-        if (reorder_space)
-        {
-            cout << "Test3";
-            fespace1 = new ParFiniteElementSpace(pmesh1, fec1, dim, Ordering::byNODES);
-        }
-        else
-        {
-            cout << "Test4";
-            fespace1 = new ParFiniteElementSpace(pmesh1, fec1, dim, Ordering::byVDIM);
-        }
-    }
+    ParFiniteElementSpace* fespace2;
+    const bool use_nodal_fespace = pmesh1->NURBSext && !amg_elast; // false
+
+
+    fec1 = new H1_FECollection(order, dim);
+    fec2 = new H1_FECollection(order, dim);
+
+
+    fespace1 = new ParFiniteElementSpace(pmesh1, fec1, dim, Ordering::byVDIM);
+    fespace2 = new ParFiniteElementSpace(pmesh2, fec2, dim, Ordering::byVDIM);
+
 
 
     HYPRE_BigInt size = fespace1->GlobalTrueVSize();
@@ -105,9 +96,21 @@ int main(int argc, char* argv[])
 
     
 
-    // 9. Define linear and bilinear forms
+    // 8b. Define linear and bilinear forms, set bcs to 0 on all boundaries
 
-    // 10. Assembly
+    // 8c. Assembly
+
+    // 8d. Solve for bubble function
+
+    // 8e. Save using VisIt
+
+    // CHECK YOUR SOLUTION SO THAT IT'S NOT 0 EVERYWHERE.
+    // iF IT IS, THEN YOU DON'T NEED THIS STEP, PROVIDED THAT I AM RIGHT...
+
+    // 8f. Get bubble function interpolation
+
+
+    // 9. Define new bilinear forms for real solution
 
     // 11. Training with governing equation
 
