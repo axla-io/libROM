@@ -19,7 +19,9 @@ int main(int argc, char* argv[])
     // 2. Parse command-line options.
     const char* mesh_file1 = "../data/rhino1.mesh";
     const char* mesh_file2 = "../data/rhino2.mesh";
+    int order = 1;
     bool amg_elast = 0;
+    bool reorder_space = false;
 
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file1, "-m1", "--mesh1",
@@ -55,8 +57,8 @@ int main(int argc, char* argv[])
 
 
     // 6. Define parallel meshes by a partitioning of the serial meshes.
-    ParMesh* pmesh1(MPI_COMM_WORLD, *mesh1);
-    ParMesh* pmesh2(MPI_COMM_WORLD, *mesh2);
+    ParMesh* pmesh1 = new ParMesh(MPI_COMM_WORLD, *mesh1);
+    ParMesh* pmesh2 = new ParMesh(MPI_COMM_WORLD, *mesh2);
 
     delete mesh1;
     delete mesh2;
@@ -109,7 +111,16 @@ int main(int argc, char* argv[])
 
     // 11. Training with governing equation
 
-
+    /*
+    if (fec)
+    {
+        delete fespace;
+        delete fec;
+    }
+    */
+    
+    delete pmesh1;
+    delete pmesh2;
 
 
     cout << "All good!";
