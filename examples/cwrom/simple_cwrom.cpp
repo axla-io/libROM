@@ -45,17 +45,17 @@ int main(int argc, char* argv[])
 
 
     // 4. Read the (serial) meshes for the components.
-    Mesh mesh1(mesh_file1, 1, 1);
-    Mesh mesh2(mesh_file2, 1, 1);
-    int dim = mesh1.Dimension();
+    Mesh* mesh1(mesh_file1, 1, 1);
+    Mesh* mesh2(mesh_file2, 1, 1);
+    int dim = mesh1->Dimension();
 
 
     // 5. Refine mesh
 
 
     // 6. Define parallel meshes by a partitioning of the serial meshes.
-    ParMesh* pmesh1(MPI_COMM_WORLD, mesh1);
-    ParMesh* pmesh2(MPI_COMM_WORLD, mesh2);
+    ParMesh* pmesh1(MPI_COMM_WORLD, *mesh1);
+    ParMesh* pmesh2(MPI_COMM_WORLD, *mesh2);
 
     mesh1.Clear();
     mesh2.Clear();
