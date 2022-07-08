@@ -209,11 +209,11 @@ int main(int argc, char* argv[])
 
     // 8. Determine the list of true (i.e. parallel conforming) essential
     //    boundary dofs. In this example, the boundary conditions are defined by
-    //    marking only boundary attribute 1 from the mesh as essential and
+    //    marking only boundary attribute 2 from the mesh as essential and
     //    converting it to a list of true dofs.
     Array<int> ess_tdof_list, ess_bdr(pmesh->bdr_attributes.Max());
     ess_bdr = 0;
-    ess_bdr[0] = 1;
+    ess_bdr[1] = 1;
     fespace->GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
 
 
@@ -232,15 +232,15 @@ int main(int argc, char* argv[])
     //     boundary attribute 2 is indicated by the use of piece-wise constants
     //     coefficient for its last component.
     VectorArrayCoefficient f(dim);
-    for (int i = 0; i < dim - 1; i++)
+    for (int i = 0; i < dim; i++)
     {
         f.Set(i, new ConstantCoefficient(0.0));
     }
     {
         Vector pull_force(pmesh->bdr_attributes.Max());
         pull_force = 0.0;
-        pull_force(1) = ext_force;
-        f.Set(dim - 1, new PWConstCoefficient(pull_force));
+        pull_force(2) = ext_force;
+        f.Set(0, new PWConstCoefficient(pull_force));
     }
 
     ParLinearForm* b = new ParLinearForm(fespace);
