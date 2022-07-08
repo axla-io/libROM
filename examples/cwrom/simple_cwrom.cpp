@@ -54,8 +54,8 @@ int main(int argc, char* argv[])
 
 
     // 6. Define parallel meshes by a partitioning of the serial meshes.
-    ParMesh pmesh1(MPI_COMM_WORLD, mesh1);
-    ParMesh pmesh2(MPI_COMM_WORLD, mesh2);
+    ParMesh* pmesh1(MPI_COMM_WORLD, mesh1);
+    ParMesh* pmesh2(MPI_COMM_WORLD, mesh2);
 
     mesh1.Clear();
     mesh2.Clear();
