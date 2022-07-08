@@ -72,8 +72,8 @@ int main(int argc, char* argv[])
     if (use_nodal_fespace)
     {
         cout << "Test1";
-        fec = NULL;
-        fespace = (ParFiniteElementSpace*)pmesh->GetNodes()->FESpace();
+        fec1 = NULL;
+        fespace1 = (ParFiniteElementSpace*)pmesh1->GetNodes()->FESpace();
     }
     else
     {
@@ -82,12 +82,12 @@ int main(int argc, char* argv[])
         if (reorder_space)
         {
             cout << "Test3";
-            fespace1 = new ParFiniteElementSpace(pmesh, fec, dim, Ordering::byNODES);
+            fespace1 = new ParFiniteElementSpace(pmesh1, fec1, dim, Ordering::byNODES);
         }
         else
         {
             cout << "Test4";
-            fespace1 = new ParFiniteElementSpace(pmesh, fec, dim, Ordering::byVDIM);
+            fespace1 = new ParFiniteElementSpace(pmesh1, fec1, dim, Ordering::byVDIM);
         }
     }
 
