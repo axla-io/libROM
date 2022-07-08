@@ -394,18 +394,12 @@ int main(int argc, char* argv[])
     // 29. print timing info
     if (myid == 0)
     {
-        if (fom || offline)
-        {
-            printf("Elapsed time for assembling FOM: %e second\n",
-                assembleTimer.RealTime());
-            printf("Elapsed time for solving FOM: %e second\n", solveTimer.RealTime());
-        }
-        if (online)
-        {
-            printf("Elapsed time for assembling ROM: %e second\n",
-                assembleTimer.RealTime());
-            printf("Elapsed time for solving ROM: %e second\n", solveTimer.RealTime());
-        }
+
+        printf("Elapsed time for assembling FOM: %e second\n",
+            assembleTimer.RealTime());
+        printf("Elapsed time for solving FOM: %e second\n", solveTimer.RealTime());
+
+
     }
 
     // 30. Free the used memory.

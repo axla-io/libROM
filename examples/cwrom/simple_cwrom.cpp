@@ -9,6 +9,7 @@ using namespace mfem;
 
 int main(int argc, char* argv[])
 {
+
     // 1. Initialize MPI.
     int num_procs, myid;
     MPI_Init(&argc, &argv);
@@ -42,7 +43,7 @@ int main(int argc, char* argv[])
 
     // 4. Read the (serial) mesh for the reference component.
     Mesh mesh(mesh_file, 1, 1);
-    dim = mesh.Dimension();
+    int dim = mesh.Dimension();
 
 
     // 5. Refine mesh
