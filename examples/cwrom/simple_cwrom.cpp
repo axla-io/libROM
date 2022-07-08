@@ -19,6 +19,7 @@ int main(int argc, char* argv[])
     // 2. Parse command-line options.
     const char* mesh_file1 = "../data/rhino1.mesh";
     const char* mesh_file2 = "../data/rhino2.mesh";
+    bool amg_elast = 0;
 
     OptionsParser args(argc, argv);
     args.AddOption(&mesh_file1, "-m1", "--mesh1",
@@ -45,8 +46,8 @@ int main(int argc, char* argv[])
 
 
     // 4. Read the (serial) meshes for the components.
-    Mesh* mesh1(mesh_file1, 1, 1);
-    Mesh* mesh2(mesh_file2, 1, 1);
+    Mesh* mesh1 = new Mesh(mesh_file1, 1, 1);
+    Mesh* mesh2 = new Mesh(mesh_file2, 1, 1);
     int dim = mesh1->Dimension();
 
 
@@ -57,8 +58,8 @@ int main(int argc, char* argv[])
     ParMesh* pmesh1(MPI_COMM_WORLD, *mesh1);
     ParMesh* pmesh2(MPI_COMM_WORLD, *mesh2);
 
-    mesh1.Clear();
-    mesh2.Clear();
+    delete mesh1;
+    delete mesh2;
 
 
     // 8. Solve the problem approximately using 
