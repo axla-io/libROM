@@ -673,7 +673,187 @@ int main(int argc, char* argv[])
 
     CAROM::SampleMeshManager* smm = nullptr;
 
-    ode_solver->Init(oper);
+
+    // The online phase
+    if (online)
+    {
+
+        // Read bases
+        CAROM::BasisReader readerVX("basisVX");
+        BR_librom = readerR.getSpatialBasis(0.0);
+        if (rrdim == -1)
+            rrdim = BR_librom->numColumns();
+        else
+            BR_librom = GetFirstColumns(rrdim,
+                BR_librom);  // TODO: reduce rrdim if too large
+
+        MFEM_VERIFY(BR_librom->numRows() == N1, "");
+
+        if (myid == 0)
+            printf("reduced VX dim = %d\n", rrdim);
+       
+
+        vector<int> sample_dofs_H;  // Indices of the sampled rows
+        vector<int> num_sample_dofs_per_proc_H(num_procs);
+
+        vector<int> sample_dofs_withH;  // Indices of the sampled rows
+        CAROM::Matrix* Hsinv = 0;
+        vector<int> num_sample_dofs_per_proc_withH;
+        CAROM::BasisReader* readerH = 0;
+        if (hyperreduce_source)
+        {
+            readerH = new CAROM::BasisReader("basisH");
+            H_librom = readerH->getSpatialBasis(0.0);
+
+            // Compute sample points using DEIM
+
+            if (nsdim == -1)
+            {
+                nsdim = H_librom->numColumns();
+            }
+
+            MFEM_VERIFY(H_librom->numColumns() >= nsdim, "");
+
+            if (H_librom->numColumns() > nsdim)
+                H_librom = GetFirstColumns(nsdim, S_librom);
+
+            if (myid == 0)
+                printf("reduced H dim = %d\n", nsdim);
+
+            // Now execute the DEIM algorithm to get the sampling information.
+            if (num_samples_req != -1)
+            {
+                nsamp_H = num_samples_req;
+            }
+            else
+            {
+                nsamp_H = nsdim;
+            }
+
+            Hsinv = new CAROM::Matrix(nsamp_S, nsdim, false);
+            sample_dofs_H.resize(nsamp_H);
+            if (use_sopt)
+            {
+                CAROM::S_OPT(H_librom,
+                    nsdim,
+                    sample_dofs_H,
+                    num_sample_dofs_per_proc_H,
+                    *Hsinv,
+                    myid,
+                    num_procs,
+                    nsamp_H);
+            }
+            else if (nsamp_H != nsdim)
+            {
+                CAROM::GNAT(H_librom,
+                    nsdim,
+                    sample_dofs_H,
+                    num_sample_dofs_per_proc_H,
+                    *Hsinv,
+                    myid,
+                    num_procs,
+                    nsamp_H);
+            }
+            else
+            {
+                CAROM::DEIM(H_librom,
+                    nsdim,
+                    sample_dofs_H,
+                    num_sample_dofs_per_proc_H,
+                    *Hsinv,
+                    myid,
+                    num_procs);
+            }
+        }
+
+        // Construct sample mesh
+
+        const int nspaces = 1;
+        std::vector<ParFiniteElementSpace*> spfespace(nspaces);
+        spfespace[0] = &fespace;
+
+        smm = new CAROM::SampleMeshManager(spfespace);
+
+        vector<int>
+            sample_dofs_empty;  // Potential variable in W space has no sample DOFs.
+        vector<int> num_sample_dofs_per_proc_empty;
+        num_sample_dofs_per_proc_empty.assign(num_procs, 0);
+
+        smm->RegisterSampledVariable("VX", FESPACE, sample_dofs,
+            num_sample_dofs_per_proc);
+
+        if (hyperreduce_source)
+        {
+            
+            smm->RegisterSampledVariable("H", FESPACE, sample_dofs_S,
+                num_sample_dofs_per_proc_S);
+        }
+
+        smm->ConstructSampleMesh();
+
+
+        // TODO: What does the following code do??
+        w = new CAROM::Vector(rrdim + rwdim, false);
+        w_W = new CAROM::Vector(rwdim, false);
+
+        // Initialize w = B_W^T p.
+        BW_librom->transposeMult(*p_W_librom, *w_W);
+
+        for (int i = 0; i < rrdim; ++i)
+            (*w)(i) = 0.0;
+
+        for (int i = 0; i < rwdim; ++i)
+            (*w)(rrdim + i) = (*w_W)(i);
+
+        // Note that some of this could be done only on the ROM solver process, but it is tricky, since RomOperator assembles Bsp in parallel.
+        wMFEM = new Vector(&((*w)(0)), rrdim + rwdim);
+
+
+
+       
+        if (myid == 0)
+        {
+            sp_FEspace = smm->GetSampleFESpace(FESPACE);
+
+            // Initialize sp_p with initial conditions.
+            {
+                // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
+                //    boundary conditions on a beam-like mesh (see description above).
+
+                BlockVector sp_vx(true_offset);
+                ParGridFunction sp_v_gf, sp_x_gf;
+                sp_v_gf.MakeTRef(&sp_FEspace, sp_vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction.
+                sp_x_gf.MakeTRef(&sp_FEspace, sp_vx, true_offset[1]);
+
+
+                VectorFunctionCoefficient velo(dim, InitialVelocity);
+                sp_v_gf.ProjectCoefficient(velo);
+                sp_v_gf.SetTrueVector();
+                VectorFunctionCoefficient deform(dim, InitialDeformation);
+                sp_x_gf.ProjectCoefficient(deform);
+                sp_x_gf.SetTrueVector();
+
+                sp_v_gf.SetFromTrueVector();
+                sp_x_gf.SetFromTrueVector();
+            }
+
+            // Define operator
+            soper = new HyperelasticOperator oper(*sp_FEspace, ess_bdr, visc, mu, K);
+
+        }
+
+        // FIX RomOperator so that it works
+        romop = new RomOperator(&oper, soper, rrdim, rwdim, nldim, smm,
+            BR_librom, FR_librom, BW_librom,
+            Bsinv, newton_rel_tol, newton_abs_tol, newton_iter,
+            S_librom, Ssinv, myid, hyperreduce_source, num_samples_req != -1);
+
+        ode_solver.Init(*romop);
+
+        delete readerS;
+    }
+    else  // fom
+        ode_solver.Init(oper);
 
 
     // 11. Perform time-integration
@@ -697,24 +877,35 @@ int main(int argc, char* argv[])
 
         fom_timer.Stop();
 
-
-
-        // Take sample
-        if (basis_generator_vx->isNextSample(t))
-        {
-            oper.CopyDvxDt(dvxdt); 
-            basis_generator_vx->takeSample(vx->GetData(), t, dt);
-            basis_generator_vx->computeNextSampleTime(vx->GetData(), dvxdt.GetData(), t);
-        
-            if (hyperreduce_source)
+        if (online)
+        {   
+            // TODO make this work!
+            if (myid == 0)
             {
-                basis_generator_H->takeSample(dvxdt.GetData(), t, dt); 
-
+                ode_solver.Step(*wMFEM, t, dt);
             }
-        
+
+            MPI_Bcast(&t, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
         }
 
+        if (offline)
+        {
+            // Take sample
+            if (basis_generator_vx->isNextSample(t))
+            {
+                oper.CopyDvxDt(dvxdt);
+                basis_generator_vx->takeSample(vx->GetData(), t, dt);
+                basis_generator_vx->computeNextSampleTime(vx->GetData(), dvxdt.GetData(), t);
 
+                if (hyperreduce_source)
+                {
+                    basis_generator_H->takeSample(dvxdt.GetData(), t, dt);
+
+                }
+
+            }
+        }
+        
 
         if (last_step || (ti % vis_steps) == 0)
         {
