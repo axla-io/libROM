@@ -220,6 +220,94 @@ void visualize(ostream& out, ParMesh* mesh, ParGridFunction* deformed_nodes,
 
 
 
+// TODO: move this to the library?
+CAROM::Matrix* GetFirstColumns(const int N, const CAROM::Matrix* A)
+{
+    CAROM::Matrix* S = new CAROM::Matrix(A->numRows(), std::min(N, A->numColumns()),
+        A->distributed());
+    for (int i = 0; i < S->numRows(); ++i)
+    {
+        for (int j = 0; j < S->numColumns(); ++j)
+            (*S)(i, j) = (*A)(i, j);
+    }
+
+    // delete A;  // TODO: find a good solution for this.
+    return S;
+}
+
+// TODO: move this to the library?
+void BasisGeneratorFinalSummary(CAROM::BasisGenerator* bg,
+    const double energyFraction, int& cutoff, const std::string cutoffOutputPath)
+{
+    const int rom_dim = bg->getSpatialBasis()->numColumns();
+    const CAROM::Vector* sing_vals = bg->getSingularValues();
+
+    MFEM_VERIFY(rom_dim <= sing_vals->dim(), "");
+
+    double sum = 0.0;
+    for (int sv = 0; sv < sing_vals->dim(); ++sv) {
+        sum += (*sing_vals)(sv);
+    }
+
+    vector<double> energy_fractions = { 0.9999, 0.999, 0.99, 0.9 };
+    bool reached_cutoff = false;
+
+    ofstream outfile(cutoffOutputPath);
+
+    double partialSum = 0.0;
+    for (int sv = 0; sv < sing_vals->dim(); ++sv) {
+        partialSum += (*sing_vals)(sv);
+        for (int i = energy_fractions.size() - 1; i >= 0; i--)
+        {
+            if (partialSum / sum > energy_fractions[i])
+            {
+                outfile << "For energy fraction: " << energy_fractions[i] << ", take first "
+                    << sv + 1 << " of " << sing_vals->dim() << " basis vectors" << endl;
+                energy_fractions.pop_back();
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (!reached_cutoff && partialSum / sum > energyFraction)
+        {
+            cutoff = sv + 1;
+            reached_cutoff = true;
+        }
+    }
+
+    if (!reached_cutoff) cutoff = sing_vals->dim();
+    outfile << "Take first " << cutoff << " of " << sing_vals->dim() <<
+        " basis vectors" << endl;
+    outfile.close();
+}
+
+void MergeBasis(const int dimFOM, const int nparam, const int max_num_snapshots,
+    std::string name)
+{
+    MFEM_VERIFY(nparam > 0, "Must specify a positive number of parameter sets");
+
+    bool update_right_SV = false;
+    bool isIncremental = false;
+
+    CAROM::Options options(dimFOM, nparam * max_num_snapshots, 1, update_right_SV);
+    CAROM::BasisGenerator generator(options, isIncremental, "basis" + name);
+
+    for (int paramID = 0; paramID < nparam; ++paramID)
+    {
+        std::string snapshot_filename = "basis" + std::to_string(
+            paramID) + "_" + name + "_snapshot";
+        generator.loadSamples(snapshot_filename, "snapshot");
+    }
+
+    generator.endSamples(); // save the merged basis file
+
+    int cutoff = 0;
+    BasisGeneratorFinalSummary(&generator, 0.9999, cutoff, "mergedSV_" + name);
+}
+
 int main(int argc, char* argv[])
 {
     // 1. Initialize MPI.
@@ -452,6 +540,29 @@ int main(int argc, char* argv[])
     const std::string basisFileName = "basis" + std::to_string(id_param);
     int max_num_snapshots = int(t_final / dt) + 2;
 
+    // The merge phase
+    if (merge)
+    {
+        totalTimer.Clear();
+        totalTimer.Start();
+
+        MergeBasis(R_space.GetTrueVSize(), nsets, max_num_snapshots, "VX");
+
+        if (hyperreduce_source)
+        {
+            MergeBasis(W_space.GetTrueVSize(), nsets, max_num_snapshots, "H");
+        }
+
+        totalTimer.Stop();
+        if (myid == 0)
+        {
+            printf("Elapsed time for merging and building ROM basis: %e second\n",
+                totalTimer.RealTime());
+        }
+        MPI_Finalize();
+        return 0;
+    }
+
 
     // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
     //    boundary conditions on a beam-like mesh (see description above).
@@ -547,7 +658,7 @@ int main(int argc, char* argv[])
                 basisFileName + "_H");
 
         basis_generator_vx = new CAROM::BasisGenerator(options_vx, isIncremental,
-            basisFileName + "_R");
+            basisFileName + "_VX");
 
     }
 
