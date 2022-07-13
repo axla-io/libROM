@@ -50,6 +50,8 @@ protected:
 
     mutable Vector z; // auxiliary vector
 
+    Vector dvxdt_prev; // for computing sample time
+
 public:
     HyperelasticOperator(ParFiniteElementSpace& f, Array<int>& ess_bdr,
         double visc, double mu, double K);
@@ -64,6 +66,12 @@ public:
     double KineticEnergy(const ParGridFunction& v) const;
     void GetElasticEnergyDensity(const ParGridFunction& x,
         ParGridFunction& w) const;
+
+    void CopyDvxDt(Vector& dvxdt) const
+    {
+        dvxdt = dvxdt_prev;
+    }
+
 
     virtual ~HyperelasticOperator();
 };
@@ -239,7 +247,7 @@ int main(int argc, char* argv[])
     int vis_steps = 1;
 
     // ROM parameters
-    bool offline = false;
+    bool offline = true; // debug mode
     bool merge = false;
     bool online = false;
     bool use_sopt = false;
@@ -462,6 +470,8 @@ int main(int argc, char* argv[])
     ess_bdr[0] = 1; // boundary attribute 1 (index 0) is fixed
 
 
+    Vector dvxdt;
+
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
     HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
@@ -518,8 +528,6 @@ int main(int argc, char* argv[])
         cout << "initial kinetic energy (KE) = " << ke0 << endl;
         cout << "initial   total energy (TE) = " << (ee0 + ke0) << endl;
     }
-
-
 
 
     // 10. Create pROM object.
@@ -580,27 +588,19 @@ int main(int argc, char* argv[])
 
 
 
-        // Take sample pROM
-        const bool sample_vx = basis_generator_W->isNextSample(t);
-
-        if (sample_vx
-            && hyperreduce_source) // TODO: Instead, basis_generator_S->isNextSample(t) could be used if dS/dt were computed.
+        // Take sample
+        if (basis_generator_vx->isNextSample(t))
         {
-            oper.GetSource(source); // Kolla upp denna implementation och ändra till operatorn.
-            basis_generator_S->takeSample(source.GetData(), t, dt); // Hur ändrar jag till operatorn
-
-
-            // TODO: dfdt? In this example, one can implement the exact formula.
-            //   In general, one can use finite differences in time (dpdt is computed that way).
-            //basis_generator_S->computeNextSampleTime(p.GetData(), dfdt.GetData(), t);
-        }
-
-        if (sample_vx)
-        {
-            oper.CopyDpDt_W(dpdt); // Kolla upp detta! Vad ska man göra istället?
-
+            oper.CopyDvxDt(dvxdt); 
             basis_generator_vx->takeSample(vx->GetData(), t, dt);
-            basis_generator_vx->computeNextSampleTime(vx->GetData(), dpdt.GetData(), t);
+            basis_generator_vx->computeNextSampleTime(vx->GetData(), dvxdt.GetData(), t);
+        
+            if (hyperreduce_source)
+            {
+                basis_generator_H->takeSample(dvxdt.GetData(), t, dt); 
+
+            }
+        
         }
 
 
@@ -638,6 +638,33 @@ int main(int argc, char* argv[])
         }
 
     }
+
+
+
+
+
+    if (offline)
+    {
+        // Sample final solution, to prevent extrapolation in ROM between the last sample and the end of the simulation.
+
+        oper.CopyDvxDt(dvxdt);
+        basis_generator_vx->takeSample(vx->GetData(), t, dt);
+        basis_generator_vx->writeSnapshot();
+
+        if (hyperreduce_source)
+        {
+            basis_generator_H->takeSample(dvxdt.GetData(), t, dt);
+            basis_generator_H->writeSnapshot();
+
+        }
+
+
+        // Terminate the sampling and write out information.
+        delete basis_generator_vx;
+        delete basis_generator_H;
+    }
+
+
 
 
     // 12. Save the displaced mesh, the velocity and elastic energy.
@@ -826,6 +853,8 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     newton_solver.SetAbsTol(0.0);
     newton_solver.SetAdaptiveLinRtol(2, 0.5, 0.9);
     newton_solver.SetMaxIter(10);
+
+    dvxdt_prev = 0.0;
 }
 
 void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
@@ -869,6 +898,7 @@ void HyperelasticOperator::ImplicitSolve(const double dt,
     newton_solver.Mult(zero, dv_dt);
     MFEM_VERIFY(newton_solver.GetConverged(), "Newton solver did not converge.");
     add(v, dt, dv_dt, dx_dt);
+    dvxdt_prev = dvx_dt;
 }
 
 double HyperelasticOperator::ElasticEnergy(const ParGridFunction& x) const
