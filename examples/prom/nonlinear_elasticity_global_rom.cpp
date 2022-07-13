@@ -1264,3 +1264,399 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 
 
+
+
+
+
+
+
+
+RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
+    NonlinearDiffusionOperator* fomSp_, const int rrdim_, const int rwdim_,
+    const int nldim_, CAROM::SampleMeshManager* smm_,
+    const CAROM::Matrix* V_R_, const CAROM::Matrix* U_R_, const CAROM::Matrix* V_W_,
+    const CAROM::Matrix* Bsinv,
+    const double newton_rel_tol, const double newton_abs_tol, const int newton_iter,
+    const CAROM::Matrix* S_, const CAROM::Matrix* Ssinv_,
+    const int myid, const bool hyperreduce_source_, const bool oversampling_)
+    : TimeDependentOperator(rrdim_ + rwdim_, 0.0),
+    newton_solver(),
+    fom(fom_), fomSp(fomSp_), BR(NULL), rrdim(rrdim_), rwdim(rwdim_), nldim(nldim_),
+    smm(smm_),
+    nsamp_R(smm_->GetNumVarSamples("V")),
+    nsamp_S(hyperreduce_source_ ? smm_->GetNumVarSamples("S") : 0),
+    V_R(*V_R_), U_R(U_R_), V_W(*V_W_), VTU_R(rrdim_, nldim_, false),
+    y0(height), dydt_prev(height), zY(nldim, false), zN(std::max(nsamp_R, 1),
+        false),
+    Vsinv(Bsinv), J(height),
+    zS(std::max(nsamp_S, 1), false), zT(std::max(nsamp_S, 1), false), Ssinv(Ssinv_),
+    VTCS_W(rwdim, std::max(nsamp_S, 1), false), S(S_),
+    VtzR(rrdim_, false), hyperreduce_source(hyperreduce_source_), oversampling(oversampling_)
+{
+    dydt_prev = 0.0;
+
+    if (myid == 0)
+    {
+        zR.SetSize(fomSp_->zR.Size());
+        BRsp = new CAROM::Matrix(fomSp->zR.Size(), rrdim, false);
+        BWsp = new CAROM::Matrix(fomSp->zW.Size(), rwdim, false);
+    }
+
+    V_R.transposeMult(*U_R, VTU_R);
+
+    smm->GatherDistributedMatrixRows("V", V_R, rrdim, *BRsp);
+    smm->GatherDistributedMatrixRows("P", V_W, rwdim, *BWsp);
+
+    // Compute BR = V_W^t B V_R and CR = V_W^t C V_W, and store them throughout the simulation.
+
+    BR = new CAROM::Matrix(rwdim, rrdim, false);
+    CR = new CAROM::Matrix(rwdim, rwdim, false);
+    Compute_CtAB(fom->Bmat, V_R, V_W, BR);
+    Compute_CtAB(fom->Cmat, V_W, V_W, CR);
+
+    // The ROM residual is
+    // [ V_{R,s}^{-1} M(a(Pst V_W p)) Pst V_R v + V_R^t B^T V_W p ]
+    // [ V_W^t C V_W dp_dt - V_W^t B V_R v - V_W^t f ]
+    // or, with [v, p] = [V_R yR, V_W yW],
+    // [ V_{R,s}^{-1} M(a(Pst V_W yW)) Pst V_R yR + BR^T yW ]
+    // [ CR dyW_dt - BR yR - V_W^t f ]
+    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
+    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
+    // [                 -dt BR                        CR   ]
+
+    if (myid == 0)
+    {
+        const double linear_solver_rel_tol = 1.0e-14;
+
+        J_gmres = new GMRESSolver;
+        J_gmres->SetRelTol(linear_solver_rel_tol);
+        J_gmres->SetAbsTol(0.0);
+        J_gmres->SetMaxIter(1000);
+        J_gmres->SetPrintLevel(1);
+
+        newton_solver.iterative_mode = true;
+        newton_solver.SetSolver(*J_gmres);
+        newton_solver.SetOperator(*this);
+        newton_solver.SetPrintLevel(1);
+        newton_solver.SetRelTol(newton_rel_tol);
+        newton_solver.SetAbsTol(newton_abs_tol);
+        newton_solver.SetMaxIter(newton_iter);
+
+        const int spdim = fomSp->Height();
+
+        psp_librom = new CAROM::Vector(spdim, false);
+        psp = new Vector(&((*psp_librom)(0)), spdim);
+
+        // Define sub-vectors of psp.
+        psp_R = new Vector(psp->GetData(), fomSp->zR.Size());
+        psp_W = new Vector(psp->GetData() + fomSp->zR.Size(), fomSp->zW.Size());
+
+        psp_R_librom = new CAROM::Vector(psp_R->GetData(), psp_R->Size(), false, false);
+        psp_W_librom = new CAROM::Vector(psp_W->GetData(), psp_W->Size(), false, false);
+    }
+
+    hyperreduce = true;
+    sourceFOM = false;
+
+    if (!hyperreduce || sourceFOM)
+    {
+        const int fdim = fom->Height();
+
+        pfom_librom = new CAROM::Vector(fdim, false);
+        pfom = new Vector(&((*pfom_librom)(0)), fdim);
+
+        // Define sub-vectors of pfom.
+        pfom_R = new Vector(pfom->GetData(), fom->zR.Size());
+        pfom_W = new Vector(pfom->GetData() + fom->zR.Size(), fom->zW.Size());
+
+        pfom_R_librom = new CAROM::Vector(pfom_R->GetData(), pfom_R->Size(), false,
+            false);
+        pfom_W_librom = new CAROM::Vector(pfom_W->GetData(), pfom_W->Size(), false,
+            false);
+
+        zfomR.SetSize(fom->zR.Size());
+        zfomR_librom = new CAROM::Vector(zfomR.GetData(), zfomR.Size(), false, false);
+
+        zfomW.SetSize(fom->zW.Size());
+    }
+
+    if (hyperreduce_source)
+        Compute_CtAB(fom->Cmat, *S, V_W, &VTCS_W);
+}
+
+RomOperator::~RomOperator()
+{
+    delete BR;
+    delete CR;
+}
+
+void RomOperator::Mult_Hyperreduced(const Vector& dy_dt, Vector& res) const
+{
+    MFEM_VERIFY(dy_dt.Size() == rrdim + rwdim && res.Size() == rrdim + rwdim, "");
+
+    Vector y(y0);
+    y.Add(current_dt, dy_dt);
+
+    // Evaluate the ROM residual:
+    // [ V_R^T U_R U_{R,s}^{-1} M(a(Pst V_W yW)) Pst V_R yR + BR^T yW ]
+    // [ CR dyW_dt - BR yR - V_W^t C f ]
+
+    CAROM::Vector y_librom(y.GetData(), y.Size(), false, false);
+    CAROM::Vector yR_librom(y.GetData(), rrdim, false, false);
+    CAROM::Vector yW_librom(y.GetData() + rrdim, rwdim, false, false);
+
+    CAROM::Vector resR_librom(res.GetData(), rrdim, false, false);
+    CAROM::Vector resW_librom(res.GetData() + rrdim, rwdim, false, false);
+
+    CAROM::Vector dyW_dt_librom(dy_dt.GetData() + rrdim, rwdim, false, false);
+
+    // 1. Lift p_s+ = B_s+ y
+    BRsp->mult(yR_librom, *psp_R_librom);
+    BWsp->mult(yW_librom, *psp_W_librom);
+
+    fomSp->SetParameters(*psp);
+
+    fomSp->Mmat->Mult(*psp_R, zR);  // M(a(Pst V_W yW)) Pst V_R yR
+
+    // Select entries out of zR.
+    smm->GetSampledValues("V", zR, zN);
+
+    // Note that it would be better to just store VTU_R * Vsinv, but these are small matrices.
+    if (oversampling)
+    {
+        Vsinv->transposeMult(zN, zY);
+    }
+    else
+    {
+        Vsinv->mult(zN, zY);
+    }
+
+    BR->transposeMult(yW_librom, resR_librom);
+    VTU_R.multPlus(resR_librom, zY, 1.0);
+
+    // Apply V_W^t C to fsp
+
+    if (sourceFOM)
+    {
+        fom->GetSource(zfomW);
+        zfomW.Neg();
+
+        fom->Cmat->Mult(zfomW, *pfom_W);
+
+        V_W.transposeMult(*pfom_W_librom, resW_librom);
+
+        CR->multPlus(resW_librom, dyW_dt_librom, 1.0);
+        BR->multPlus(resW_librom, yR_librom, -1.0);
+    }
+    else
+    {
+        CR->mult(dyW_dt_librom, resW_librom);
+        BR->multPlus(resW_librom, yR_librom, -1.0);
+
+        fomSp->GetSource(fomSp->zW);
+
+        if (hyperreduce_source)
+        {
+            // Select entries
+            smm->GetSampledValues("S", fomSp->zW, zT);
+
+            if (oversampling)
+            {
+                Ssinv->transposeMult(zT, zS);
+            }
+            else
+            {
+                Ssinv->mult(zT, zS);
+            }
+
+            // Multiply by the f-basis, followed by C, followed by V_W^T. This is stored in VTCS_W = V_W^T CS.
+            VTCS_W.multPlus(resW_librom, zS, -1.0);
+        }
+        else
+        {
+            fomSp->Cmat->Mult(fomSp->zW, *psp_W);
+
+            const int nRsp = fomSp->zR.Size();
+            const int nWsp = fomSp->zW.Size();
+            for (int i = 0; i < rwdim; ++i)
+                for (int j = 0; j < nWsp; ++j)
+                    res[rrdim + i] -= (*BWsp)(j, i) * (*psp_W)[j];
+        }
+    }
+}
+
+void RomOperator::Mult_FullOrder(const Vector& dy_dt, Vector& res) const
+{
+    MFEM_VERIFY(dy_dt.Size() == rrdim + rwdim && res.Size() == rrdim + rwdim, "");
+
+    Vector y(y0);
+    y.Add(current_dt, dy_dt);
+
+    // Evaluate the unreduced ROM residual:
+    // [ V_R^T M(a(V_W yW)) V_R yR + BR^T yW ]
+    // [ CR dyW_dt - BR yR - V_W^t Cf ]
+
+    CAROM::Vector y_librom(y.GetData(), y.Size(), false, false);
+    CAROM::Vector yR_librom(y.GetData(), rrdim, false, false);
+    CAROM::Vector yW_librom(y.GetData() + rrdim, rwdim, false, false);
+
+    CAROM::Vector resR_librom(res.GetData(), rrdim, false, false);
+    CAROM::Vector resW_librom(res.GetData() + rrdim, rwdim, false, false);
+
+    CAROM::Vector dyW_dt_librom(dy_dt.GetData() + rrdim, rwdim, false, false);
+
+    // 1. Lift p_fom = [V_R^T V_W^T]^T y
+    V_R.mult(yR_librom, *pfom_R_librom);
+    V_W.mult(yW_librom, *pfom_W_librom);
+
+    fom->SetParameters(*pfom);
+
+    fom->Mmat->Mult(*pfom_R, zfomR);  // M(a(V_W yW)) V_R yR
+    V_R.transposeMult(*zfomR_librom, VtzR);  // V_R^T M(a(V_W yW)) V_R yR
+
+    BR->transposeMult(yW_librom, resR_librom);
+    resR_librom.plusEqAx(1.0, VtzR);
+
+    // Apply V_W^t C to f
+    fom->GetSource(zfomW);
+    zfomW.Neg();
+
+    fom->Cmat->Mult(zfomW, *pfom_W);
+
+    V_W.transposeMult(*pfom_W_librom, resW_librom);
+
+    CR->multPlus(resW_librom, dyW_dt_librom, 1.0);
+    BR->multPlus(resW_librom, yR_librom, -1.0);
+}
+
+void RomOperator::Mult(const Vector& dy_dt, Vector& res) const
+{
+    if (hyperreduce)
+        Mult_Hyperreduced(dy_dt, res);
+    else
+        Mult_FullOrder(dy_dt, res);
+}
+
+void RomOperator::ImplicitSolve(const double dt, const Vector& y, Vector& dy_dt)
+{
+    y0 = y;
+
+    current_dt = dt;
+    fomSp->SetTime(GetTime());
+    fomSp->current_dt = dt;
+
+    if (!hyperreduce || sourceFOM)
+    {
+        fom->SetTime(GetTime());
+        fom->current_dt = dt;
+    }
+
+    // Set the initial guess for dp_dt, to be used by newton_solver.
+    //dp_dt = 0.0;
+    dy_dt = dydt_prev;
+
+    Vector zero; // empty vector is interpreted as zero r.h.s. by NewtonSolver
+    newton_solver.Mult(zero, dy_dt);
+
+    // MFEM_VERIFY(newton_solver.GetConverged(), "Newton solver did not converge.");
+    if (newton_solver.GetConverged())
+        dydt_prev = dy_dt;
+    else
+    {
+        dy_dt = 0.0;  // Zero update in SDIRK Step() function.
+        //newtonFailure = true;
+        MFEM_VERIFY(false, "ROM Newton convergence failure!");
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+Operator& RomOperator::GetGradient(const Vector& p) const
+{
+    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
+    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
+    // [                 -dt BR                        CR   ]
+
+    // Compute JR = V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R, assuming M(a'(Pst V_W yW)) is already stored in fomSp->Mprimemat,
+    // which is computed in fomSp->SetParameters, which was called by RomOperator::Mult, which was called by newton_solver
+    // before this call to GetGradient. Note that V_R restricted to the sample matrix is already stored in Bsp.
+
+    CAROM::Vector r(nldim, false);
+    CAROM::Vector c(rrdim, false);
+    CAROM::Vector z(nsamp_R, false);
+
+    for (int i = 0; i < rrdim; ++i)
+    {
+        if (hyperreduce)
+        {
+            // Compute the i-th column of M(a'(Pst V_W yW)) Pst V_R.
+            for (int j = 0; j < psp_R->Size(); ++j)
+                (*psp_R)[j] = (*BRsp)(j, i);
+
+            fomSp->Mprimemat.Mult(*psp_R, zR);
+
+            smm->GetSampledValues("V", zR, z);
+
+            // Note that it would be better to just store VTU_R * Vsinv, but these are small matrices.
+
+            if (oversampling)
+            {
+                Vsinv->transposeMult(z, r);
+            }
+            else
+            {
+                Vsinv->mult(z, r);
+            }
+
+            VTU_R.mult(r, c);
+        }
+        else
+        {
+            // Compute the i-th column of V_R^T M(a'(V_W yW)) V_R.
+            for (int j = 0; j < pfom_R->Size(); ++j)
+                (*pfom_R)[j] = V_R(j, i);
+
+            fom->Mprimemat.Mult(*pfom_R, zfomR);
+            V_R.transposeMult(*zfomR_librom, c);  // V_R^T M(a'(V_W yW)) V_R(:,i)
+        }
+
+        for (int j = 0; j < rrdim; ++j)
+            J(j, i) = c(
+                j);  // This already includes a factor of current_dt, from Mprimemat.
+
+        for (int j = 0; j < rwdim; ++j)
+        {
+            J(rrdim + j, i) = -current_dt * (*BR)(j, i);
+            J(i, rrdim + j) = current_dt * (*BR)(j, i);
+        }
+    }
+
+    for (int i = 0; i < rwdim; ++i)
+    {
+        for (int j = 0; j < rwdim; ++j)
+        {
+            J(rrdim + j, rrdim + i) = (*CR)(j, i);
+        }
+    }
+
+    // TODO: define Jacobian block-wise rather than entry-wise?
+    /*
+    gradient->SetBlock(0, 0, JR, current_dt);
+    gradient->SetBlock(0, 1, BRT, current_dt);
+    gradient->SetBlock(1, 0, BR, -current_dt);
+    gradient->SetBlock(1, 1, CR);
+    */
+
+    // PrintFDJacobian(p);
+
+    return J;
+}
+
