@@ -77,37 +77,6 @@ public:
 };
 
 
-/** Nonlinear operator of the form:
-    k --> (M + dt*S)*k + H(x + dt*v + dt^2*k) + S*v,
-    where M and S are given BilinearForms, H is a given NonlinearForm, v and x
-    are given vectors, and dt is a scalar. */
-class ReducedSystemOperator : public Operator
-{
-private:
-    ParBilinearForm* M, * S;
-    ParNonlinearForm* H;
-    mutable HypreParMatrix* Jacobian;
-    double dt;
-    const Vector* v, * x;
-    mutable Vector w, z;
-    const Array<int>& ess_tdof_list;
-
-public:
-    ReducedSystemOperator(ParBilinearForm* M_, ParBilinearForm* S_,
-        ParNonlinearForm* H_, const Array<int>& ess_tdof_list);
-
-    /// Set current dt, v, x values - needed to compute action and Jacobian.
-    void SetParameters(double dt_, const Vector* v_, const Vector* x_);
-
-    /// Compute y = H(x + dt (v + dt k)) + M k + S (v + dt k).
-    virtual void Mult(const Vector& k, Vector& y) const;
-
-    /// Compute J = M + dt S + dt^2 grad_H(x + dt (v + dt k)).
-    virtual Operator& GetGradient(const Vector& k) const;
-
-    virtual ~ReducedSystemOperator();
-};
-
 
 // TODO: Change to be Hyperelastic operator
 class RomOperator : public TimeDependentOperator
@@ -151,7 +120,6 @@ private:
 
     CAROM::SampleMeshManager* smm;
 
-    void PrintFDJacobian(const Vector& p) const;
 
 protected:
     CAROM::Matrix* BR;
@@ -176,12 +144,6 @@ public:
     virtual void Mult(const Vector& y, Vector& dy_dt) const;
     void Mult_Hyperreduced(const Vector& y, Vector& dy_dt) const;
     void Mult_FullOrder(const Vector& y, Vector& dy_dt) const;
-
-    /** Solve the Backward-Euler equation: k = f(p + dt*k, t), for the unknown k.
-        This is the only requirement for high-order SDIRK implicit integration.*/
-    virtual void ImplicitSolve(const double dt, const Vector& y, Vector& dy_dt);
-
-    virtual Operator& GetGradient(const Vector& y) const;
 
     CAROM::Matrix V_W, V_R, VTU_R;
 
@@ -437,15 +399,8 @@ int main(int argc, char* argv[])
     switch (ode_solver_type)
     {
         // Implicit L-stable methods
-    case 1:
-        ode_solver = new BackwardEulerSolver;
-        break;
-    case 2:
-        ode_solver = new SDIRK23Solver(2);
-        break;
-    case 3:
-        ode_solver = new SDIRK33Solver;
-        break;
+        // To be added...
+
         // Explicit methods
     case 11:
         ode_solver = new ForwardEulerSolver;
@@ -463,15 +418,7 @@ int main(int argc, char* argv[])
         ode_solver = new GeneralizedAlphaSolver(0.5);
         break;
         // Implicit A-stable methods (not L-stable)
-    case 22:
-        ode_solver = new ImplicitMidpointSolver;
-        break;
-    case 23:
-        ode_solver = new SDIRK23Solver;
-        break;
-    case 24:
-        ode_solver = new SDIRK34Solver;
-        break;
+        // To be added...
     default:
         if (myid == 0)
         {
@@ -1046,53 +993,6 @@ void visualize(ostream& out, ParMesh* mesh, ParGridFunction* deformed_nodes,
 
 
 
-ReducedSystemOperator::ReducedSystemOperator(
-    ParBilinearForm* M_, ParBilinearForm* S_, ParNonlinearForm* H_,
-    const Array<int>& ess_tdof_list_)
-    : Operator(M_->ParFESpace()->TrueVSize()), M(M_), S(S_), H(H_),
-    Jacobian(NULL), dt(0.0), v(NULL), x(NULL), w(height), z(height),
-    ess_tdof_list(ess_tdof_list_)
-{ }
-
-void ReducedSystemOperator::SetParameters(double dt_, const Vector* v_,
-    const Vector* x_)
-{
-    dt = dt_;
-    v = v_;
-    x = x_;
-}
-
-void ReducedSystemOperator::Mult(const Vector& k, Vector& y) const
-{
-    // compute: y = H(x + dt*(v + dt*k)) + M*k + S*(v + dt*k)
-    add(*v, dt, k, w);
-    add(*x, dt, w, z);
-    H->Mult(z, y);
-    M->TrueAddMult(k, y);
-    S->TrueAddMult(w, y);
-    y.SetSubVector(ess_tdof_list, 0.0);
-}
-
-Operator& ReducedSystemOperator::GetGradient(const Vector& k) const
-{
-    delete Jacobian;
-    SparseMatrix* localJ = Add(1.0, M->SpMat(), dt, S->SpMat());
-    add(*v, dt, k, w);
-    add(*x, dt, w, z);
-    localJ->Add(dt * dt, H->GetLocalGradient(z));
-    Jacobian = M->ParallelAssemble(localJ);
-    delete localJ;
-    HypreParMatrix* Je = Jacobian->EliminateRowsCols(ess_tdof_list);
-    delete Je;
-    return *Jacobian;
-}
-
-ReducedSystemOperator::~ReducedSystemOperator()
-{
-    delete Jacobian;
-}
-
-
 HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     Array<int>& ess_bdr, double visc,
     double mu, double K)
@@ -1178,30 +1078,10 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     M_solver.Mult(z, dv_dt);
 
     dx_dt = v;
-}
-
-void HyperelasticOperator::ImplicitSolve(const double dt,
-    const Vector& vx, Vector& dvx_dt)
-{
-    int sc = height / 2;
-    Vector v(vx.GetData() + 0, sc);
-    Vector x(vx.GetData() + sc, sc);
-    Vector dv_dt(dvx_dt.GetData() + 0, sc);
-    Vector dx_dt(dvx_dt.GetData() + sc, sc);
-
-    // By eliminating kx from the coupled system:
-    //    kv = -M^{-1}*[H(x + dt*kx) + S*(v + dt*kv)]
-    //    kx = v + dt*kv
-    // we reduce it to a nonlinear equation for kv, represented by the
-    // reduced_oper. This equation is solved with the newton_solver
-    // object (using J_solver and J_prec internally).
-    reduced_oper->SetParameters(dt, &v, &x);
-    Vector zero; // empty vector is interpreted as zero r.h.s. by NewtonSolver
-    newton_solver.Mult(zero, dv_dt);
-    MFEM_VERIFY(newton_solver.GetConverged(), "Newton solver did not converge.");
-    add(v, dt, dv_dt, dx_dt);
     dvxdt_prev = dvx_dt;
 }
+
+
 
 double HyperelasticOperator::ElasticEnergy(const ParGridFunction& x) const
 {
@@ -1313,16 +1193,6 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
     CR = new CAROM::Matrix(rwdim, rwdim, false);
     Compute_CtAB(fom->Bmat, V_R, V_W, BR);
     Compute_CtAB(fom->Cmat, V_W, V_W, CR);
-
-    // The ROM residual is
-    // [ V_{R,s}^{-1} M(a(Pst V_W p)) Pst V_R v + V_R^t B^T V_W p ]
-    // [ V_W^t C V_W dp_dt - V_W^t B V_R v - V_W^t f ]
-    // or, with [v, p] = [V_R yR, V_W yW],
-    // [ V_{R,s}^{-1} M(a(Pst V_W yW)) Pst V_R yR + BR^T yW ]
-    // [ CR dyW_dt - BR yR - V_W^t f ]
-    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
-    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
-    // [                 -dt BR                        CR   ]
 
     if (myid == 0)
     {
@@ -1537,126 +1407,5 @@ void RomOperator::Mult(const Vector& dy_dt, Vector& res) const
         Mult_FullOrder(dy_dt, res);
 }
 
-void RomOperator::ImplicitSolve(const double dt, const Vector& y, Vector& dy_dt)
-{
-    y0 = y;
 
-    current_dt = dt;
-    fomSp->SetTime(GetTime());
-    fomSp->current_dt = dt;
-
-    if (!hyperreduce || sourceFOM)
-    {
-        fom->SetTime(GetTime());
-        fom->current_dt = dt;
-    }
-
-    // Set the initial guess for dp_dt, to be used by newton_solver.
-    //dp_dt = 0.0;
-    dy_dt = dydt_prev;
-
-    Vector zero; // empty vector is interpreted as zero r.h.s. by NewtonSolver
-    newton_solver.Mult(zero, dy_dt);
-
-    // MFEM_VERIFY(newton_solver.GetConverged(), "Newton solver did not converge.");
-    if (newton_solver.GetConverged())
-        dydt_prev = dy_dt;
-    else
-    {
-        dy_dt = 0.0;  // Zero update in SDIRK Step() function.
-        //newtonFailure = true;
-        MFEM_VERIFY(false, "ROM Newton convergence failure!");
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-Operator& RomOperator::GetGradient(const Vector& p) const
-{
-    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
-    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
-    // [                 -dt BR                        CR   ]
-
-    // Compute JR = V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R, assuming M(a'(Pst V_W yW)) is already stored in fomSp->Mprimemat,
-    // which is computed in fomSp->SetParameters, which was called by RomOperator::Mult, which was called by newton_solver
-    // before this call to GetGradient. Note that V_R restricted to the sample matrix is already stored in Bsp.
-
-    CAROM::Vector r(nldim, false);
-    CAROM::Vector c(rrdim, false);
-    CAROM::Vector z(nsamp_R, false);
-
-    for (int i = 0; i < rrdim; ++i)
-    {
-        if (hyperreduce)
-        {
-            // Compute the i-th column of M(a'(Pst V_W yW)) Pst V_R.
-            for (int j = 0; j < psp_R->Size(); ++j)
-                (*psp_R)[j] = (*BRsp)(j, i);
-
-            fomSp->Mprimemat.Mult(*psp_R, zR);
-
-            smm->GetSampledValues("V", zR, z);
-
-            // Note that it would be better to just store VTU_R * Vsinv, but these are small matrices.
-
-            if (oversampling)
-            {
-                Vsinv->transposeMult(z, r);
-            }
-            else
-            {
-                Vsinv->mult(z, r);
-            }
-
-            VTU_R.mult(r, c);
-        }
-        else
-        {
-            // Compute the i-th column of V_R^T M(a'(V_W yW)) V_R.
-            for (int j = 0; j < pfom_R->Size(); ++j)
-                (*pfom_R)[j] = V_R(j, i);
-
-            fom->Mprimemat.Mult(*pfom_R, zfomR);
-            V_R.transposeMult(*zfomR_librom, c);  // V_R^T M(a'(V_W yW)) V_R(:,i)
-        }
-
-        for (int j = 0; j < rrdim; ++j)
-            J(j, i) = c(
-                j);  // This already includes a factor of current_dt, from Mprimemat.
-
-        for (int j = 0; j < rwdim; ++j)
-        {
-            J(rrdim + j, i) = -current_dt * (*BR)(j, i);
-            J(i, rrdim + j) = current_dt * (*BR)(j, i);
-        }
-    }
-
-    for (int i = 0; i < rwdim; ++i)
-    {
-        for (int j = 0; j < rwdim; ++j)
-        {
-            J(rrdim + j, rrdim + i) = (*CR)(j, i);
-        }
-    }
-
-    // TODO: define Jacobian block-wise rather than entry-wise?
-    /*
-    gradient->SetBlock(0, 0, JR, current_dt);
-    gradient->SetBlock(0, 1, BRT, current_dt);
-    gradient->SetBlock(1, 0, BR, -current_dt);
-    gradient->SetBlock(1, 1, CR);
-    */
-
-    // PrintFDJacobian(p);
-
-    return J;
-}
 
