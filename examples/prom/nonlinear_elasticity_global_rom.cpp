@@ -154,8 +154,6 @@ public:
 
 
 
-
-
 /** Function representing the elastic energy density for the given hyperelastic
     model+deformation. Used in HyperelasticOperator::GetElasticEnergyDensity. */
 class ElasticEnergyCoefficient : public Coefficient
@@ -785,7 +783,7 @@ int main(int argc, char* argv[])
             }
 
             // Define operator
-            soper = new HyperelasticOperator oper(*sp_FEspace, ess_bdr, visc, mu, K);
+            soper = new HyperelasticOperator oper(*sp_FEspace, ess_bdr, visc, mu, K); //Ask Dylan
 
         }
 
@@ -1194,6 +1192,16 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
     Compute_CtAB(fom->Bmat, V_R, V_W, BR);
     Compute_CtAB(fom->Cmat, V_W, V_W, CR);
 
+    // The ROM residual is
+    // [ V_{R,s}^{-1} M(a(Pst V_W p)) Pst V_R v + V_R^t B^T V_W p ]
+    // [ V_W^t C V_W dp_dt - V_W^t B V_R v - V_W^t f ]
+    // or, with [v, p] = [V_R yR, V_W yW],
+    // [ V_{R,s}^{-1} M(a(Pst V_W yW)) Pst V_R yR + BR^T yW ]
+    // [ CR dyW_dt - BR yR - V_W^t f ]
+    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
+    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
+    // [                 -dt BR                        CR   ]
+
     if (myid == 0)
     {
         const double linear_solver_rel_tol = 1.0e-14;
@@ -1214,6 +1222,7 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
 
         const int spdim = fomSp->Height();
 
+        // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
         psp = new Vector(&((*psp_librom)(0)), spdim);
 
@@ -1232,6 +1241,7 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
     {
         const int fdim = fom->Height();
 
+        // This is for saving the recreated predictions
         pfom_librom = new CAROM::Vector(fdim, false);
         pfom = new Vector(&((*pfom_librom)(0)), fdim);
 
@@ -1254,11 +1264,19 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
         Compute_CtAB(fom->Cmat, *S, V_W, &VTCS_W);
 }
 
+
+
+
+
+
 RomOperator::~RomOperator()
 {
     delete BR;
     delete CR;
 }
+
+
+
 
 void RomOperator::Mult_Hyperreduced(const Vector& dy_dt, Vector& res) const
 {
@@ -1284,8 +1302,9 @@ void RomOperator::Mult_Hyperreduced(const Vector& dy_dt, Vector& res) const
     BRsp->mult(yR_librom, *psp_R_librom);
     BWsp->mult(yW_librom, *psp_W_librom);
 
-    fomSp->SetParameters(*psp);
+    fomSp->SetParameters(*psp);   // fomSp is the sampled operator. What should this one do?
 
+    // Apply 
     fomSp->Mmat->Mult(*psp_R, zR);  // M(a(Pst V_W yW)) Pst V_R yR
 
     // Select entries out of zR.
@@ -1355,57 +1374,51 @@ void RomOperator::Mult_Hyperreduced(const Vector& dy_dt, Vector& res) const
     }
 }
 
-void RomOperator::Mult_FullOrder(const Vector& dy_dt, Vector& res) const
+
+
+void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 {
-    MFEM_VERIFY(dy_dt.Size() == rrdim + rwdim && res.Size() == rrdim + rwdim, "");
+    // Assuming that the input is vx in generalized coordinates...
+    // Calculate V_vx^T M^-1 (H(x0 + V_vx x^) + S (v0 + V_vx v^)
+    // 
+    
+    // Check that the sizes match
+    MFEM_VERIFY(vx.Size() == rrdim && dvx_dt.Size() == rrdim, ""); // rrdim should be renamed
 
-    Vector y(y0);
-    y.Add(current_dt, dy_dt);
+   
+    // Lift the input vectors
+    // I.e. perform vx = vx0 + V_vx vx^, where vx^ is the input
+    V_vx.mult(vx, *zfom_vx_librom);
+    add(zfom_vx_librom, vx0, fom_vx_librom) // Get initial conditions stored in class, also fom_vx
 
-    // Evaluate the unreduced ROM residual:
-    // [ V_R^T M(a(V_W yW)) V_R yR + BR^T yW ]
-    // [ CR dyW_dt - BR yR - V_W^t Cf ]
+    // Create temporary vectors
+    // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
+    int sc = height / 2;
+    CAROM::Vector v_librom(fom_vx_librom.GetData() + 0, sc);
+    CAROM::Vector x_librom(fom_vx_librom.GetData() + sc, sc);
+    CAROM::Vector dv_dt_librom(dvx_dt.GetData() + 0, sc);
+    CAROM::Vector dx_dt_librom(dvx_dt.GetData() + sc, sc);
+    
+    H.Mult(x_librom, z_librom);
+    if (viscosity != 0.0)
+    {
+        S.TrueAddMult(v_librom, z_librom);
+        z_librom.SetSubVector(ess_tdof_list, 0.0);
+    }
+    z_librom.Neg(); // z = -z
+    M_solver.Mult(z_librom, dv_dt_temp);
+    V_R.transposeMult(dv_dt_temp, dv_dt_librom);
 
-    CAROM::Vector y_librom(y.GetData(), y.Size(), false, false);
-    CAROM::Vector yR_librom(y.GetData(), rrdim, false, false);
-    CAROM::Vector yW_librom(y.GetData() + rrdim, rwdim, false, false);
 
-    CAROM::Vector resR_librom(res.GetData(), rrdim, false, false);
-    CAROM::Vector resW_librom(res.GetData() + rrdim, rwdim, false, false);
-
-    CAROM::Vector dyW_dt_librom(dy_dt.GetData() + rrdim, rwdim, false, false);
-
-    // 1. Lift p_fom = [V_R^T V_W^T]^T y
-    V_R.mult(yR_librom, *pfom_R_librom);
-    V_W.mult(yW_librom, *pfom_W_librom);
-
-    fom->SetParameters(*pfom);
-
-    fom->Mmat->Mult(*pfom_R, zfomR);  // M(a(V_W yW)) V_R yR
-    V_R.transposeMult(*zfomR_librom, VtzR);  // V_R^T M(a(V_W yW)) V_R yR
-
-    BR->transposeMult(yW_librom, resR_librom);
-    resR_librom.plusEqAx(1.0, VtzR);
-
-    // Apply V_W^t C to f
-    fom->GetSource(zfomW);
-    zfomW.Neg();
-
-    fom->Cmat->Mult(zfomW, *pfom_W);
-
-    V_W.transposeMult(*pfom_W_librom, resW_librom);
-
-    CR->multPlus(resW_librom, dyW_dt_librom, 1.0);
-    BR->multPlus(resW_librom, yR_librom, -1.0);
+    dx_dt_librom = v_librom;
+    dvxdt_prev = dvx_dt;
 }
 
-void RomOperator::Mult(const Vector& dy_dt, Vector& res) const
+
+void RomOperator::Mult(const Vector& vx, Vector& dvx_dt) const
 {
     if (hyperreduce)
-        Mult_Hyperreduced(dy_dt, res);
+        Mult_Hyperreduced(vx, dvx_dt);
     else
-        Mult_FullOrder(dy_dt, res);
+        Mult_FullOrder(vx, dvx_dt);
 }
-
-
-
