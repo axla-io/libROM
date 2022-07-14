@@ -1274,6 +1274,15 @@ RomOperator::~RomOperator()
 
 void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 {
+    // Assuming that the input is vx in generalized coordinates...
+    // Calculate V_vx^T M^-1 (H_red(x0 + V_vx x^) + S (v0 + V_vx v^)
+    // Where V_vx is the (reduced) basis for the solution space.
+    // And H_red is the reduced non linear operator 
+    // H_red = V_H H^
+    // H^ = (Z^T V_H)^-1 * Z^T * H_sample
+    // V_H is the (reduced) basis for H
+
+
     // Check that the sizes match
     MFEM_VERIFY(vx.Size() == rrdim && dvx_dt.Size() == rrdim, ""); // rrdim should be renamed
 
@@ -1282,6 +1291,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     // I.e. perform vx = vx0 + V_vx vx^, where vx^ is the input
     V_vx.mult(vx, *zfom_vx_librom);
     add(zfom_vx_librom, vx0, fom_vx_librom) // Get initial conditions stored in class, also fom_vx
+
 
     // Create temporary vectors
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
@@ -1338,7 +1348,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 {
     // Assuming that the input is vx in generalized coordinates...
     // Calculate V_vx^T M^-1 (H(x0 + V_vx x^) + S (v0 + V_vx v^)
-    // 
+    // Where V_vx is the (reduced) basis for the solution space.
     
     // Check that the sizes match
     MFEM_VERIFY(vx.Size() == rrdim && dvx_dt.Size() == rrdim, ""); // rrdim should be renamed
