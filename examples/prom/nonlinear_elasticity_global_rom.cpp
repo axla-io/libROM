@@ -82,72 +82,55 @@ public:
 class RomOperator : public TimeDependentOperator
 {
 private:
-    int rrdim, rwdim, nldim;
-    int nsamp_R, nsamp_S;
+    int rxdim, rvdim;
+    int nsamp_H;
     double current_dt;
     bool oversampling;
-    NewtonSolver newton_solver;
-    GMRESSolver* J_gmres;
-    CAROM::Matrix* BRsp, * BWsp;
-    CAROM::Vector* psp_librom, * psp_R_librom, * psp_W_librom;
+    CAROM::Matrix* V_v_sp, * V_x_sp;
+    CAROM::Vector* psp_librom, * psp_x_librom, * psp_v_librom;
     Vector* psp;
-    Vector* psp_R;
-    Vector* psp_W;
-    mutable Vector zR;
-    mutable CAROM::Vector zY;
+    Vector* psp_x;
+    Vector* psp_v;
+    mutable Vector zH;
+    mutable CAROM::Vector zX;
     mutable CAROM::Vector zN;
-    const CAROM::Matrix* Vsinv;
+    const CAROM::Matrix* Hsinv;
 
-    // Data for source function
-    const CAROM::Matrix* Ssinv;
-    mutable CAROM::Vector zS;
-    mutable CAROM::Vector zT;
-    const CAROM::Matrix* S;
+    bool hyperreduce;
 
-    mutable DenseMatrix J;
-
-    bool hyperreduce, hyperreduce_source;
-    bool sourceFOM;
-
-    CAROM::Vector* pfom_librom, * pfom_R_librom, * pfom_W_librom;
+    CAROM::Vector* pfom_librom, * pfom_x_librom, * pfom_v_librom;
     Vector* pfom;
-    Vector* pfom_R;
-    Vector* pfom_W;
-    mutable Vector zfomR;
-    mutable Vector zfomW;
-    CAROM::Vector* zfomR_librom;
-    mutable CAROM::Vector VtzR;
+    Vector* pfom_x;
+    Vector* pfom_v;
+    mutable Vector zfomx;
+    mutable Vector zfomv;
+    CAROM::Vector* zfomx_librom;
 
     CAROM::SampleMeshManager* smm;
 
 
 protected:
-    CAROM::Matrix* BR;
-    CAROM::Matrix* CR;
-    const CAROM::Matrix* U_R;
-    Vector y0;
-    Vector dydt_prev;
-    NonlinearDiffusionOperator* fom;
-    NonlinearDiffusionOperator* fomSp;
+    CAROM::Matrix* S_hat;
+    CAROM::Matrix* M_hat;
+    const CAROM::Matrix* U_H;
+    Vector x0, v0;
+    Vector H_prev;
+    HyperElasticOperator* fom;
+    HyperElasticOperator* fomSp;
 
 public:
-    RomOperator(NonlinearDiffusionOperator* fom_,
-        NonlinearDiffusionOperator* fomSp_,
-        const int rrdim_, const int rwdim_, const int nldim_,
+    RomOperator(HyperelasticOperator* fom_,
+        HyperelasticOperator* fomSp_, const int rrdim_,
         CAROM::SampleMeshManager* smm_,
-        const CAROM::Matrix* V_R_, const CAROM::Matrix* U_R_, const CAROM::Matrix* V_W_,
-        const CAROM::Matrix* Bsinv,
-        const double newton_rel_tol, const double newton_abs_tol, const int newton_iter,
-        const CAROM::Matrix* S_, const CAROM::Matrix* Ssinv_,
-        const int myid, const bool hyperreduce_source, const bool oversampling);
+        const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
+        const CAROM::Matrix* Hsinv,
+        const int myid, const bool oversampling_);
 
     virtual void Mult(const Vector& y, Vector& dy_dt) const;
     void Mult_Hyperreduced(const Vector& y, Vector& dy_dt) const;
     void Mult_FullOrder(const Vector& y, Vector& dy_dt) const;
 
-    CAROM::Matrix V_W, V_R, VTU_R;
-
-    CAROM::Matrix VTCS_W;
+    CAROM::Matrix V_v, V_x, V_vTU_H;
 
     virtual ~RomOperator();
 };
@@ -719,20 +702,17 @@ int main(int argc, char* argv[])
 
         smm = new CAROM::SampleMeshManager(spfespace);
 
-        vector<int>
-            sample_dofs_empty;  // Potential variable in W space has no sample DOFs.
+
         vector<int> num_sample_dofs_per_proc_empty;
         num_sample_dofs_per_proc_empty.assign(num_procs, 0);
 
         smm->RegisterSampledVariable("VX", FESPACE, sample_dofs,
             num_sample_dofs_per_proc);
 
-        if (hyperreduce_source)
-        {
             
-            smm->RegisterSampledVariable("H", FESPACE, sample_dofs_S,
-                num_sample_dofs_per_proc_S);
-        }
+        smm->RegisterSampledVariable("H", FESPACE, sample_dofs_S,
+            num_sample_dofs_per_proc_S);
+    
 
         smm->ConstructSampleMesh();
 
@@ -742,7 +722,7 @@ int main(int argc, char* argv[])
         w_W = new CAROM::Vector(rwdim, false);
 
         // Initialize w = B_W^T p.
-        BW_librom->transposeMult(*p_W_librom, *w_W);
+        BW_librom->transposeMult(*p_W_librom, *w_W); // This is a reduced version of the pressure field somehow
 
         for (int i = 0; i < rrdim; ++i)
             (*w)(i) = 0.0;
@@ -751,7 +731,7 @@ int main(int argc, char* argv[])
             (*w)(rrdim + i) = (*w_W)(i);
 
         // Note that some of this could be done only on the ROM solver process, but it is tricky, since RomOperator assembles Bsp in parallel.
-        wMFEM = new Vector(&((*w)(0)), rrdim + rwdim);
+        wMFEM = new Vector(&((*w)(0)), rrdim + rwdim);    //wMFEM is a 
 
 
 
@@ -1146,90 +1126,77 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 
 
-
-RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
-    NonlinearDiffusionOperator* fomSp_, const int rrdim_, const int rwdim_,
-    const int nldim_, CAROM::SampleMeshManager* smm_,
-    const CAROM::Matrix* V_R_, const CAROM::Matrix* U_R_, const CAROM::Matrix* V_W_,
-    const CAROM::Matrix* Bsinv,
-    const double newton_rel_tol, const double newton_abs_tol, const int newton_iter,
-    const CAROM::Matrix* S_, const CAROM::Matrix* Ssinv_,
-    const int myid, const bool hyperreduce_source_, const bool oversampling_)
+RomOperator::RomOperator(HyperelasticOperator* fom_,
+    HyperelasticOperator* fomSp_, const int rrdim_,
+    CAROM::SampleMeshManager* smm_,
+    const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
+    const CAROM::Matrix* Hsinv,
+    const int myid, const bool oversampling_)
     : TimeDependentOperator(rrdim_ + rwdim_, 0.0),
-    newton_solver(),
-    fom(fom_), fomSp(fomSp_), BR(NULL), rrdim(rrdim_), rwdim(rwdim_), nldim(nldim_),
-    smm(smm_),
-    nsamp_R(smm_->GetNumVarSamples("V")),
-    nsamp_S(hyperreduce_source_ ? smm_->GetNumVarSamples("S") : 0),
-    V_R(*V_R_), U_R(U_R_), V_W(*V_W_), VTU_R(rrdim_, nldim_, false),
-    y0(height), dydt_prev(height), zY(nldim, false), zN(std::max(nsamp_R, 1),
-        false),
-    Vsinv(Bsinv), J(height),
-    zS(std::max(nsamp_S, 1), false), zT(std::max(nsamp_S, 1), false), Ssinv(Ssinv_),
-    VTCS_W(rwdim, std::max(nsamp_S, 1), false), S(S_),
-    VtzR(rrdim_, false), hyperreduce_source(hyperreduce_source_), oversampling(oversampling_)
+    fom(fom_), fomSp(fomSp_), rrdim(rrdim_), x0(x0_), v0(v0_),
+    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(*U_H_),
+    zN(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
+    oversampling(oversampling_), z(height / 2)
 {
-    dydt_prev = 0.0;
 
     if (myid == 0)
     {
-        zR.SetSize(fomSp_->zR.Size());
-        BRsp = new CAROM::Matrix(fomSp->zR.Size(), rrdim, false);
-        BWsp = new CAROM::Matrix(fomSp->zW.Size(), rwdim, false);
+        V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rrdim, false);
+        V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rwdim, false);
     }
 
-    V_R.transposeMult(*U_R, VTU_R);
+    // Gather distributed vectors
+    smm->GatherDistributedMatrixRows("V", V_v, rvdim, *V_v_sp);
+    smm->GatherDistributedMatrixRows("X", V_x, rxdim, *V_x_sp);
 
-    smm->GatherDistributedMatrixRows("V", V_R, rrdim, *BRsp);
-    smm->GatherDistributedMatrixRows("P", V_W, rwdim, *BWsp);
+    // Create V_vTU_H, for hyperreduction
+    V_v.transposeMult(*U_H, V_vTU_H);
 
-    // Compute BR = V_W^t B V_R and CR = V_W^t C V_W, and store them throughout the simulation.
+    // Create S_hat
+    S_hat = new CAROM::Matrix(rvdim, rvdim, false);
+    Compute_CtAB(fom->S, V_v, V_v, S_hat);
 
-    BR = new CAROM::Matrix(rwdim, rrdim, false);
-    CR = new CAROM::Matrix(rwdim, rwdim, false);
-    Compute_CtAB(fom->Bmat, V_R, V_W, BR);
-    Compute_CtAB(fom->Cmat, V_W, V_W, CR);
+    // Create M_hat
+    M_hat = new CAROM::Matrix(rvdim, rvdim, false);
+    Compute_CtAB(fom->Mmat, V_v, V_v, M_hat);
 
-    // The ROM residual is
-    // [ V_{R,s}^{-1} M(a(Pst V_W p)) Pst V_R v + V_R^t B^T V_W p ]
-    // [ V_W^t C V_W dp_dt - V_W^t B V_R v - V_W^t f ]
-    // or, with [v, p] = [V_R yR, V_W yW],
-    // [ V_{R,s}^{-1} M(a(Pst V_W yW)) Pst V_R yR + BR^T yW ]
-    // [ CR dyW_dt - BR yR - V_W^t f ]
-    // The Jacobian with respect to [dyR_dt, dyW_dt], with [yR, yW] = [yR0, yW0] + dt * [dyR_dt, dyW_dt], is
-    // [ dt V_{R,s}^{-1} M(a'(Pst V_W yW)) Pst V_R  dt BR^T ]
-    // [                 -dt BR                        CR   ]
+    // Create M_hat_solver
+    const double rel_tol = 1e-8;
+    M_hat_solver.iterative_mode = false;
+    M_hat_solver.SetRelTol(rel_tol);
+    M_hat_solver.SetAbsTol(0.0);
+    M_hat_solver.SetMaxIter(30);
+    M_hat_solver.SetPrintLevel(0);
+    M_prec.SetType(HypreSmoother::Jacobi);
+    M_hat_solver.SetPreconditioner(M_prec);
+    M_hat_solver.SetOperator(*M_hat);
+
 
     if (myid == 0)
     {
-        const double linear_solver_rel_tol = 1.0e-14;
+        const int spdim = fomSp->Height();  // Unreduced height
+        zH.SetSize(spdim / 2); // Samples of H
 
-        J_gmres = new GMRESSolver;
-        J_gmres->SetRelTol(linear_solver_rel_tol);
-        J_gmres->SetAbsTol(0.0);
-        J_gmres->SetMaxIter(1000);
-        J_gmres->SetPrintLevel(1);
+        // Set size of H storage vector
+        H_prev(spdim / 2);
 
-        newton_solver.iterative_mode = true;
-        newton_solver.SetSolver(*J_gmres);
-        newton_solver.SetOperator(*this);
-        newton_solver.SetPrintLevel(1);
-        newton_solver.SetRelTol(newton_rel_tol);
-        newton_solver.SetAbsTol(newton_abs_tol);
-        newton_solver.SetMaxIter(newton_iter);
-
-        const int spdim = fomSp->Height();
+        // Allocate auxillary vectors
+        z_x_librom = new CAROM::Vector(spdim / 2, false);
+        z_v_librom = new CAROM::Vector(spdim / 2, false);
+        z(spdim / 2);
 
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
         psp = new Vector(&((*psp_librom)(0)), spdim);
 
         // Define sub-vectors of psp.
-        psp_R = new Vector(psp->GetData(), fomSp->zR.Size());
-        psp_W = new Vector(psp->GetData() + fomSp->zR.Size(), fomSp->zW.Size());
+        psp_x = new Vector(psp->GetData(), spdim / 2);
+        psp_v = new Vector(psp->GetData() + spdim / 2, spdim / 2);
 
-        psp_R_librom = new CAROM::Vector(psp_R->GetData(), psp_R->Size(), false, false);
-        psp_W_librom = new CAROM::Vector(psp_W->GetData(), psp_W->Size(), false, false);
+        psp_x_librom = new CAROM::Vector(psp_x->GetData(), psp_x->Size(), false, false);
+        psp_v_librom = new CAROM::Vector(psp_v->GetData(), psp_v->Size(), false, false);
+
+
     }
 
     hyperreduce = true;
@@ -1237,151 +1204,131 @@ RomOperator::RomOperator(NonlinearDiffusionOperator* fom_,
 
     if (!hyperreduce || sourceFOM)
     {
-        const int fdim = fom->Height();
+        const int fdim = fom->Height(); // Unreduced height
 
         // This is for saving the recreated predictions
         pfom_librom = new CAROM::Vector(fdim, false);
         pfom = new Vector(&((*pfom_librom)(0)), fdim);
 
         // Define sub-vectors of pfom.
-        pfom_R = new Vector(pfom->GetData(), fom->zR.Size());
-        pfom_W = new Vector(pfom->GetData() + fom->zR.Size(), fom->zW.Size());
+        pfom_x = new Vector(pfom->GetData(), fdim / 2);
+        pfom_v = new Vector(pfom->GetData() + fdim / 2, fdim / 2);
 
-        pfom_R_librom = new CAROM::Vector(pfom_R->GetData(), pfom_R->Size(), false,
+        pfom_x_librom = new CAROM::Vector(pfom_R->GetData(), pfom_R->Size(), false,
             false);
-        pfom_W_librom = new CAROM::Vector(pfom_W->GetData(), pfom_W->Size(), false,
+        pfom_v_librom = new CAROM::Vector(pfom_W->GetData(), pfom_W->Size(), false,
             false);
 
-        zfomR.SetSize(fom->zR.Size());
-        zfomR_librom = new CAROM::Vector(zfomR.GetData(), zfomR.Size(), false, false);
-
-        zfomW.SetSize(fom->zW.Size());
     }
 
-    if (hyperreduce_source)
-        Compute_CtAB(fom->Cmat, *S, V_W, &VTCS_W);
 }
+
 
 
 
 RomOperator::~RomOperator()
 {
-    delete BR;
-    delete CR;
+    delete S_hat;
+    delete M_hat;
 }
 
 
 
 void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 {
-    // Assuming that the input is vx in generalized coordinates...
-    // Calculate V_vx^T M^-1 (H_red(x0 + V_vx x^) + S (v0 + V_vx v^)
-    // Where V_vx is the (reduced) basis for the solution space.
-    // And H_red is the reduced non linear operator 
-    // H_red = V_H H^
-    // H^ = (Z^T V_H)^-1 * Z^T * H_sample
-    // V_H is the (reduced) basis for H
-
-
     // Check that the sizes match
     MFEM_VERIFY(vx.Size() == rrdim && dvx_dt.Size() == rrdim, ""); // rrdim should be renamed
 
-
-    // Lift the input vectors
-    // I.e. perform vx = vx0 + V_vx vx^, where vx^ is the input
-    V_vx.mult(vx, *zfom_vx_librom);
-    add(zfom_vx_librom, vx0, fom_vx_librom) // Get initial conditions stored in class, also fom_vx
-
-
-    // Create temporary vectors
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
-        int sc = height / 2;
-    CAROM::Vector v_librom(fom_vx_librom.GetData() + 0, sc);
-    CAROM::Vector x_librom(fom_vx_librom.GetData() + sc, sc);
-    CAROM::Vector dv_dt_librom(dvx_dt.GetData() + 0, sc);
-    CAROM::Vector dx_dt_librom(dvx_dt.GetData() + sc, sc);
+    int sc = spdim / 2;
+    Vector v(vx.GetData() + 0, sc);
+    Vector x(vx.GetData() + sc, sc);
+    Vector dv_dt(dvx_dt.GetData() + 0, sc);
+    Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
+    // Lift the x-, and v-vectors
+    // I.e. perform v = v0 + V_v v^, where v^ is the input
+    V_x_sp.mult(x, *z_x_librom);
+    V_v_sp.mult(v, *z_v_librom);
 
-    // Hyper-reduction
-    smm->GetSampledValues("H", zR, zN); // Sample H according to zR, to generate zN
+    add(z_x_librom, x0, *psp_x_librom) // Store liftings
+        add(z_v_librom, v0, *psp_v_librom)
 
-    // Get H^ in general coordinates
+    // Hyperreduce H
+    // Apply H to x to get zH
+    fomSp->H->Mult(*psp_x, zH);
+
+    // Sample the values from zH
+    smm->GetSampledValues("X", zH, zN);
+
+    // Apply inverse H-basis
     if (oversampling)
     {
-        Hsinv->transposeMult(zN, zH); // This is H^
+        Hsinv->transposeMult(zN, zX);
     }
     else
     {
-        Hsinv->mult(zN, zH); // This is H^
+        Hsinv->mult(zN, zX);
     }
 
-
-    // Apply H_basis
-    V_H.Mult(zH, H_red);
-
-    // Apply approximated operator
-    H_red.Mult(x_librom, z_librom);
+    // Multiply by V_v^T * U_H
+    V_vTU_H.Mult(zX, z);
 
 
-    // The Laplacian operator is linear so we don't hyperreduce it...
-    if (viscosity != 0.0)
+    if (fomSp->viscosity != 0.0)
     {
-        fom->S.TrueAddMult(v_librom, z_librom);
-        z_librom.SetSubVector(ess_tdof_list, 0.0);
+        // Apply S^, the reduced S operator, to v
+        S_hat.TrueAddMult(v, z);
+        z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
+    z.Neg(); // z = -z, because we are calculating the residual.
+    M_hat_solver.Mult(z, dv_dt); // to invert reduced mass matrix operator.
 
-    z_librom.Neg(); // z = -z
-
-    // Also kept the same, since the inverted mass matrix doesn't change
-    fom->M_solver.Mult(z_librom, dv_dt_temp);
-    V_vx.transposeMult(dv_dt_temp, dv_dt_librom);
-
-
-    dx_dt_librom = v_librom;
+    dx_dt = v;
     dvxdt_prev = dvx_dt;
-
 }
 
 
 
 void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 {
-    // Assuming that the input is vx in generalized coordinates...
-    // Calculate V_vx^T M^-1 (H(x0 + V_vx x^) + S (v0 + V_vx v^)
-    // Where V_vx is the (reduced) basis for the solution space.
-    
     // Check that the sizes match
     MFEM_VERIFY(vx.Size() == rrdim && dvx_dt.Size() == rrdim, ""); // rrdim should be renamed
 
-   
-    // Lift the input vectors
-    // I.e. perform vx = vx0 + V_vx vx^, where vx^ is the input
-    V_vx.mult(vx, *zfom_vx_librom);
-    add(zfom_vx_librom, vx0, fom_vx_librom) // Get initial conditions stored in class, also fom_vx
-
-    // Create temporary vectors
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
-    int sc = height / 2;
-    CAROM::Vector v_librom(fom_vx_librom.GetData() + 0, sc);
-    CAROM::Vector x_librom(fom_vx_librom.GetData() + sc, sc);
-    CAROM::Vector dv_dt_librom(dvx_dt.GetData() + 0, sc);
-    CAROM::Vector dx_dt_librom(dvx_dt.GetData() + sc, sc);
-    
-    fom->H.Mult(x_librom, z_librom);
+    int sc = spdim / 2;
+    Vector v(vx.GetData() + 0, sc);
+    Vector x(vx.GetData() + sc, sc);
+    Vector dv_dt(dvx_dt.GetData() + 0, sc);
+    Vector dx_dt(dvx_dt.GetData() + sc, sc);
+
+    // Lift the x-, and v-vectors
+    // I.e. perform v = v0 + V_v v^, where v^ is the input
+    V_x.mult(x, *z_x_librom);
+    V_v.mult(v, *z_v_librom);
+
+    add(z_x_librom, x0, *pfom_x_librom) // Store liftings
+    add(z_v_librom, v0, *pfom_v_librom)
+
+    // Apply H to x to get z
+    fom->H->Mult(*pfom_x, zfom_x);
+
+    V_x.transposeMult(*zfom_x_librom, z);
+
+
     if (viscosity != 0.0)
     {
-        fom->S.TrueAddMult(v_librom, z_librom);
-        z_librom.SetSubVector(ess_tdof_list, 0.0);
+        // Apply S^, the reduced S operator, to v
+        S_hat.TrueAddMult(v, z);
+        z.SetSubVector(ess_tdof_list, 0.0);
     }
-    z_librom.Neg(); // z = -z
-    fom->M_solver.Mult(z_librom, dv_dt_temp);
-    V_R.transposeMult(dv_dt_temp, dv_dt_librom);
 
+    z.Neg(); // z = -z, because we are calculating the residual.
+    M_hat_solver.Mult(z, dv_dt); // to invert reduced mass matrix operator.
 
-    dx_dt_librom = v_librom;
+    dx_dt = v;
     dvxdt_prev = dvx_dt;
 }
-
 
 void RomOperator::Mult(const Vector& vx, Vector& dvx_dt) const
 {
