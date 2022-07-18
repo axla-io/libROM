@@ -1078,7 +1078,7 @@ int main(int argc, char *argv[])
                 Vector p_R(p.GetData(), N1);
                 Vector Mp(N1);
                 oper.SetParameters(p);
-                oper.Mult_Mmat(p_R, Mp);
+                oper.Mult_Mmat(p_R, Mp); // Applies operator and stores
                 basis_generator_FR->takeSample(Mp.GetData(), t, dt);
             }
 
