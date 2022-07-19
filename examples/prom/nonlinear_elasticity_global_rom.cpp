@@ -829,7 +829,7 @@ int main(int argc, char* argv[])
             }
 
             // Define operator
-            soper = new HyperelasticOperator(*sp_FEspace, ess_bdr, visc, mu, K);
+            soper = new HyperelasticOperator(*sp_XVspace, ess_bdr, visc, mu, K);
 
         }
 
@@ -892,7 +892,7 @@ int main(int argc, char* argv[])
                 basis_generator_v->computeNextSampleTime(vx.GetBlock(0), dxdt.GetData(), t);
 
                 oper.CopyH_t(*H_t);
-                basis_generator_H->takeSample(H_t.GetData(), t, dt);
+                basis_generator_H->takeSample(H_t->GetData(), t, dt);
             }
 
             if (basis_generator_x->isNextSample(t))
@@ -951,8 +951,8 @@ int main(int argc, char* argv[])
         // Take samples
         basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
 
-        oper.CopyH_t(H_t);
-        basis_generator_H->takeSample(H_t.GetData(), t, dt);
+        oper.CopyH_t(*H_t);
+        basis_generator_H->takeSample(H_t->GetData(), t, dt);
 
         basis_generator_x->takeSample(vx.GetBlock(1), t, dt);
 
