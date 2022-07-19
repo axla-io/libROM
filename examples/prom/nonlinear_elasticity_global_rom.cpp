@@ -711,7 +711,7 @@ int main(int argc, char* argv[])
             nsamp_H = hdim;
         }
 
-        Hsinv = new CAROM::Matrix(nsamp_H, hdim, false);
+        CAROM::Matrix* Hsinv = new CAROM::Matrix(nsamp_H, hdim, false);
         vector<int> sample_dofs(nsamp_H);
         if (use_sopt)
         {
