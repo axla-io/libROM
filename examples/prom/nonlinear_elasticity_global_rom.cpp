@@ -118,6 +118,9 @@ protected:
     HyperelasticOperator* fom;
     HyperelasticOperator* fomSp;
 
+    CGSolver M_hat_solver;    // Krylov solver for inverting the reduced mass matrix M_hat
+    HypreSmoother M_hat_prec; // Preconditioner for the reduced mass matrix M_hat
+
 public:
     RomOperator(HyperelasticOperator* fom_,
         HyperelasticOperator* fomSp_, const int rrdim_,
@@ -921,16 +924,15 @@ int main(int argc, char* argv[])
         oper.CopyDvxDt(dvxdt);
         oper.CopyH_t(H_t);
 
-
         // Take samples
+        basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
 
-        basis_generator_v->takeSample(v->GetData(), t, dt);
-        basis_generator_v->computeNextSampleTime(vx->GetData(), dxdt.GetData(), t);
-
+        oper.CopyH_t(H_t);
         basis_generator_H->takeSample(H_t.GetData(), t, dt);
 
-        basis_generator_x->takeSample(x->GetData(), t, dt);
-        basis_generator_x->computeNextSampleTime(x->GetData(), dxdt.GetData(), t);
+        basis_generator_x->takeSample(vx.GetBlock(1), t, dt);
+
+    
 
 
 
@@ -1203,7 +1205,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         // Allocate auxillary vectors
         z_x_librom = new CAROM::Vector(spdim / 2, false);
         z_v_librom = new CAROM::Vector(spdim / 2, false);
-        z(spdim / 2);
+        z = new Vector(spdim / 2);
 
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
@@ -1230,14 +1232,18 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         pfom = new Vector(&((*pfom_librom)(0)), fdim);
 
         // Define sub-vectors of pfom.
+        
         pfom_x = new Vector(pfom->GetData(), fdim / 2);
         pfom_v = new Vector(pfom->GetData() + fdim / 2, fdim / 2);
+        zfomx = new Vector(fdim / 2);
+
 
         pfom_x_librom = new CAROM::Vector(pfom_x->GetData(), pfom_x->Size(), false,
             false);
         pfom_v_librom = new CAROM::Vector(pfom_v->GetData(), pfom_v->Size(), false,
             false);
-
+        zfomx_librom = new CAROM::Vector(zfomx->GetData(), zfomx->Size(), false,
+            false);
     }
 
 }
@@ -1266,11 +1272,11 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x_sp->Mult(x, *z_x_librom);
-    V_v_sp->Mult(v, *z_v_librom);
+    V_x_sp->mult(x, *z_x);
+    V_v_sp->mult(v, *z_v);
 
-    add(z_x_librom, x0, *psp_x_librom) // Store liftings
-    add(z_v_librom, v0, *psp_v_librom)
+    add(z_x, x0, *psp_x) // Store liftings
+    add(z_v, v0, *psp_v)
 
     // Hyperreduce H
     // Apply H to x to get zH
@@ -1296,7 +1302,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->TrueAddMult(v, z); 
+        S_hat->multPlus(z, v); 
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
@@ -1320,23 +1326,22 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x.mult(x, *z_x_librom);
-    V_v.mult(v, *z_v_librom);
+    V_x.mult(x, *z_x);
+    V_v.mult(v, *z_v);
 
-    add(z_x_librom, x0, *pfom_x_librom) // Store liftings
-    add(z_v_librom, v0, *pfom_v_librom)
+    add(z_x, x0, *pfom_x) // Store liftings
+    add(z_v, v0, *pfom_v)
 
     // Apply H to x to get z
     fom->H->Mult(*pfom_x, zfom_x);
-
     V_x.transposeMult(*zfom_x_librom, z);
 
 
     if (fomSp->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->TrueAddMult(v, z);
-        z.SetSubVector(ess_tdof_list, 0.0);
+        S_hat->multPlus(z, v);
+        z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
 
     z.Neg(); // z = -z, because we are calculating the residual.
