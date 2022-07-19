@@ -544,8 +544,8 @@ int main(int argc, char* argv[])
 
 
     // NOTE: Likely problems here...
-    Vector v_W = Vector(v_gf.GetTrueVector());
-    Vector x_W = Vector(v_gf.GetTrueVector());
+    Vector * v_W = new Vector(v_gf.GetTrueVector());
+    Vector * x_W = new Vector(v_gf.GetTrueVector());
 
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
     v_W_librom = new CAROM::Vector(v_W.GetData(), v_W.Size(), true, false);
@@ -788,6 +788,11 @@ int main(int argc, char* argv[])
         // Initialize w = B_W^T vx.
         BV_librom->transposeMult(v_W_librom, *w_v);
         BX_librom->transposeMult(x_W_librom, *w_x);
+
+        /*
+        delete v_w;
+        delete x_w;
+        */
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
