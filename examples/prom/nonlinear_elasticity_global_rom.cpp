@@ -54,27 +54,7 @@ public:
     void GetElasticEnergyDensity(const ParGridFunction& x,
         ParGridFunction& w) const;
 
-
-    void SetDvxDt(Vector& dvxdt) 
-    {
-        dvxdt_prev = dvxdt;
-    }
-
-    void SetH_t(Vector& H_t)
-    {
-        H_prev = H_t;
-    }
-
-
-    void CopyDvxDt(Vector& dvxdt) const
-    {
-        dvxdt = dvxdt_prev;
-    }
-
-    void CopyH_t(Vector& H_t) const
-    {
-        H_t = H_prev;
-    }
+    void GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& H)
 
     ParFiniteElementSpace& fespace;
     double viscosity;
@@ -103,6 +83,8 @@ private:
     mutable CAROM::Vector zN;
     const CAROM::Matrix* Hsinv;
     mutable Vector z;
+    mutable Vector z_x;
+    mutable Vector z_v;
 
     bool hyperreduce;
 
@@ -112,7 +94,7 @@ private:
     Vector* pfom_v;
     mutable Vector zfomx;
     mutable Vector zfomv;
-    CAROM::Vector* zfomx_librom;
+    CAROM::Vector* zfom_x_librom;
 
     CAROM::SampleMeshManager* smm;
 
@@ -559,11 +541,10 @@ int main(int argc, char* argv[])
     HyperelasticOperator* soper = 0;
 
     // Fill dvdt and dxdt
-    Vector dvxdt;
-    oper.CopyDvxDt(dvxdt);
-    int sc = dvxdt.Size() / 2;
-    Vector dvdt(dvxdt.GetData() + 0, sc);
-    Vector dxdt(dvxdt.GetData() + sc, sc);
+    Vector dvxdt(true_size * 2);
+    oper.GetH_dvxdt(vx, dvxdt, *H_t);
+    Vector dvdt(dvxdt.GetData() + 0, true_size);
+    Vector dxdt(dvxdt.GetData() + true_size, true_size);
 
     socketstream vis_v, vis_w;
     if (visualization)
@@ -829,7 +810,7 @@ int main(int argc, char* argv[])
             }
 
             // Define operator
-            soper = new HyperelasticOperator(*sp_XVspace, ess_bdr, visc, mu, K);
+            soper = new HyperelasticOperator(*sp_XV_space, ess_bdr, visc, mu, K);
 
         }
 
@@ -881,7 +862,7 @@ int main(int argc, char* argv[])
 
             if (basis_generator_v->isNextSample(t) || basis_generator_x->isNextSample(t))
             {
-                oper.CopyDvxDt(dvxdt);
+                oper.GetH_dvxdt(vx, dvxdt, *H_t);
 
             }
 
@@ -890,8 +871,6 @@ int main(int argc, char* argv[])
             {
                 basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
                 basis_generator_v->computeNextSampleTime(vx.GetBlock(0), dxdt.GetData(), t);
-
-                oper.CopyH_t(*H_t);
                 basis_generator_H->takeSample(H_t->GetData(), t, dt);
             }
 
@@ -945,13 +924,10 @@ int main(int argc, char* argv[])
     if (offline)
     {
         // Sample final solution, to prevent extrapolation in ROM between the last sample and the end of the simulation.
-        oper.CopyDvxDt(dvxdt);
-        oper.CopyH_t(*H_t);
+        oper.GetH_dvxdt(vx, dvxdt, *H_t);
 
         // Take samples
         basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
-
-        oper.CopyH_t(*H_t);
         basis_generator_H->takeSample(H_t->GetData(), t, dt);
 
         basis_generator_x->takeSample(vx.GetBlock(1), t, dt);
@@ -1110,8 +1086,30 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     M_solver.Mult(z, dv_dt);
 
     dx_dt = v;
-    SetDvxDt(dvx_dt);
 
+}
+
+void HyperelasticOperator::GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& H_new)
+{
+    // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
+    int sc = height / 2;
+    Vector v(vx.GetData() + 0, sc);
+    Vector x(vx.GetData() + sc, sc);
+    Vector dv_dt(dvx_dt.GetData() + 0, sc);
+    Vector dx_dt(dvx_dt.GetData() + sc, sc);
+
+    H.Mult(x, z);
+    H_new = z; // Store H for sampling
+
+    if (viscosity != 0.0)
+    {
+        S.TrueAddMult(v, z);
+        z.SetSubVector(ess_tdof_list, 0.0);
+    }
+    z.Neg(); // z = -z
+    M_solver.Mult(z, dv_dt);
+
+    dx_dt = v;
 }
 
 
@@ -1232,6 +1230,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         z_x_librom = new CAROM::Vector(spdim / 2, false);
         z_v_librom = new CAROM::Vector(spdim / 2, false);
         z = new Vector(spdim / 2);
+        z_v = new Vector(spdim / 2);
+        z_x = new Vector(spdim / 2);
 
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
@@ -1268,7 +1268,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
             false);
         pfom_v_librom = new CAROM::Vector(pfom_v->GetData(), pfom_v->Size(), false,
             false);
-        zfomx_librom = new CAROM::Vector(zfomx->GetData(), zfomx->Size(), false,
+        zfom_x_librom = new CAROM::Vector(zfomx->GetData(), zfomx->Size(), false,
             false);
     }
 
