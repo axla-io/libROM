@@ -829,7 +829,7 @@ int main(int argc, char* argv[])
             }
 
             // Define operator
-            soper = new HyperelasticOperator oper(**sp_FEspace, ess_bdr, visc, mu, K);
+            soper = new HyperelasticOperator(*sp_FEspace, ess_bdr, visc, mu, K);
 
         }
 
@@ -891,7 +891,7 @@ int main(int argc, char* argv[])
                 basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
                 basis_generator_v->computeNextSampleTime(vx.GetBlock(0), dxdt.GetData(), t);
 
-                oper.CopyH_t(H_t);
+                oper.CopyH_t(*H_t);
                 basis_generator_H->takeSample(H_t.GetData(), t, dt);
             }
 
@@ -946,7 +946,7 @@ int main(int argc, char* argv[])
     {
         // Sample final solution, to prevent extrapolation in ROM between the last sample and the end of the simulation.
         oper.CopyDvxDt(dvxdt);
-        oper.CopyH_t(H_t);
+        oper.CopyH_t(*H_t);
 
         // Take samples
         basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
