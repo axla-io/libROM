@@ -522,28 +522,24 @@ int main(int argc, char* argv[])
     CAROM::Vector* w = 0;
     CAROM::Vector* w_v = 0;
     CAROM::Vector* w_x = 0;
-    Vector H_t;
+    Vector* H_t = 0;
 
-    /*
 
     
-    CAROM::Vector* v_librom = 0;
     CAROM::Vector* v_W_librom = 0;
-    CAROM::Vector* x_librom = 0;
     CAROM::Vector* x_W_librom = 0;
     
 
+
     // NOTE: Likely problems here...
-    Vector v_W(v_gf.GetTrueVector());
+    Vector v_W = new Vector(v_gf.GetTrueVector());
+    Vector x_W = new Vector(v_gf.GetTrueVector());
+
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
-    CAROM::Vector v_W_librom = new CAROM::Vector(&((*v_W)(true_size)), true_size, true, false);
+    CAROM::Vector v_W_librom = new CAROM::Vector(v_W.GetData(), v_W.Size(), true, false);
+    CAROM::Vector x_W_librom = new CAROM::Vector(x_W.GetData(), x_W.Size(), true, false);
 
-    Vector x_W(x_gf.GetTrueVector());
-    //x.SetDataAndSize(&((*x_librom)(0)), true_size);
-    CAROM::Vector x_W_librom = new CAROM::Vector(&((*x_W)(true_size)), true_size, true, false);
 
-    
-    */
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
@@ -778,8 +774,8 @@ int main(int argc, char* argv[])
         w_x = new CAROM::Vector(rxdim, false);
 
         // Initialize w = B_W^T vx.
-        BV_librom->transposeMult(v_gf.GetTrueVector(), *w_v);
-        BX_librom->transposeMult(x_gf.GetTrueVector(), *w_x);
+        BV_librom->transposeMult(v_w_librom, *w_v);
+        BX_librom->transposeMult(x_w_librom, *w_x);
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
