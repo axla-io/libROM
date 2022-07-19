@@ -54,7 +54,7 @@ public:
     void GetElasticEnergyDensity(const ParGridFunction& x,
         ParGridFunction& w) const;
 
-    void GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& H)
+    void GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& H);
 
     ParFiniteElementSpace& fespace;
     double viscosity;
@@ -1075,7 +1075,6 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
     H.Mult(x, z);
-    SetH_t(z); // Store H for sampling
 
     if (viscosity != 0.0)
     {
@@ -1355,8 +1354,8 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     V_x.mult(x, *z_x);
     V_v.mult(v, *z_v);
 
-    add(z_x, x0, *pfom_x) // Store liftings
-    add(z_v, v0, *pfom_v)
+    add(z_x, x0, *pfom_x); // Store liftings
+    add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
     fom->H->Mult(*pfom_x, zfom_x);
