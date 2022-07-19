@@ -14,6 +14,9 @@
 #include <iostream>
 #include <fstream>
 
+
+typedef enum {FSPACE } FESPACE;
+
 using namespace std;
 using namespace mfem;
 
@@ -25,11 +28,8 @@ class HyperelasticOperator : public TimeDependentOperator
 {
     
 protected:
-    Array<int> ess_tdof_list;
-
     ParBilinearForm M, S;
     ParNonlinearForm H;
-    double viscosity;
     HyperelasticModel* model;
 
     HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
@@ -61,10 +61,12 @@ public:
 
     void CopyH_t(Vector& H_t) const
     {
-        H_t = H_t_prev;
+        H_t = H_prev;
     }
 
     ParFiniteElementSpace& fespace;
+    double viscosity;
+    Array<int> ess_tdof_list;
 
     virtual ~HyperelasticOperator();
 };
@@ -128,7 +130,7 @@ public:
     void Mult_Hyperreduced(const Vector& y, Vector& dy_dt) const;
     void Mult_FullOrder(const Vector& y, Vector& dy_dt) const;
 
-    Compute_CtAB(const HypreParMatrix* A, const CAROM::Matrix& B, const CAROM::Matrix& C, CAROM::Matrix* CtAB)
+    void Compute_CtAB(const HypreParMatrix* A, const CAROM::Matrix& B, const CAROM::Matrix& C, CAROM::Matrix* CtAB);
 
     CAROM::Matrix V_v, V_x, V_vTU_H;
 
@@ -499,7 +501,6 @@ int main(int argc, char* argv[])
 
     // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
     //    boundary conditions on a beam-like mesh (see description above).
-    Vector dvxdt, dvdt, dxdt;
     VectorFunctionCoefficient velo(dim, InitialVelocity);
     v_gf.ProjectCoefficient(velo);
     v_gf.SetTrueVector();
@@ -514,18 +515,19 @@ int main(int argc, char* argv[])
     ess_bdr = 0;
     ess_bdr[0] = 1; // boundary attribute 1 (index 0) is fixed
 
-
-    
-    
+    Vector* wMFEM = 0;
+    CAROM::Vector* w = 0;
+    CAROM::Vector* w_v = 0;
+    CAROM::Vector* w_x = 0;
+    Vector H_t;
 
     // NOTE: Likely problems here...
-    //v_librom = new CAROM::Vector(true_size*2, true);
-    v_librom = v_gf.GetTrueVector();
-    v.SetDataAndSize(&((*v_librom)(0)), true_size);
+    v_librom = new CAROM::Vector(v_gf.GetTrueVector());
+    //v.SetDataAndSize(&((*v_librom)(0)), true_size);
     v_W_librom = new CAROM::Vector(&((*v_librom)(true_size)), true_size, true, false);
 
-    x_librom = x_gf.GetTrueVector();
-    x.SetDataAndSize(&((*x_librom)(0)), true_size);
+    x_librom = new CAROM::Vector(x_gf.GetTrueVector());
+    //x.SetDataAndSize(&((*x_librom)(0)), true_size);
     x_W_librom = new CAROM::Vector(&((*x_librom)(true_size)), true_size, true, false);
 
 
@@ -535,6 +537,7 @@ int main(int argc, char* argv[])
     HyperelasticOperator* soper = 0;
 
     // Fill dvdt and dxdt
+    Vector dvxdt;
     oper.CopyDvxDt(dvxdt);
     int sc = dvxdt.Size() / 2;
     Vector dvdt(dvxdt.GetData() + 0, sc);
@@ -645,7 +648,7 @@ int main(int argc, char* argv[])
             BV_librom = GetFirstColumns(rvdim,
                 BV_librom);
 
-        MFEM_VERIFY(BR_librom->numRows() == true_size, ""); 
+        MFEM_VERIFY(BV_librom->numRows() == true_size, ""); 
 
         if (myid == 0)
             printf("reduced V dim = %d\n", rxdim);
@@ -660,7 +663,7 @@ int main(int argc, char* argv[])
             BX_librom = GetFirstColumns(rxdim,
                 BX_librom);  
 
-        MFEM_VERIFY(BR_librom->numRows() == true_size, ""); 
+        MFEM_VERIFY(BX_librom->numRows() == true_size, ""); 
 
         if (myid == 0)
             printf("reduced X dim = %d\n", rxdim);
@@ -668,7 +671,6 @@ int main(int argc, char* argv[])
 
 
         // Hyper reduce H
-        readerH = new CAROM::BasisReader("basisH");
         CAROM::BasisReader readerH("basisH");
         H_librom = readerH->getSpatialBasis(0.0);
 
@@ -700,13 +702,13 @@ int main(int argc, char* argv[])
         }
 
         Hsinv = new CAROM::Matrix(nsamp_H, hdim, false);
-        vector<int> sample_dofs(nsamp_R);
+        vector<int> sample_dofs(nsamp_H);
         if (use_sopt)
         {
             CAROM::S_OPT(H_librom,
                 hdim,
-                sample_dofs_H,
-                num_sample_dofs_per_proc_H,
+                sample_dofs,
+                num_sample_dofs_per_proc,
                 *Hsinv,
                 myid,
                 num_procs,
@@ -716,8 +718,8 @@ int main(int argc, char* argv[])
         {
             CAROM::GNAT(H_librom,
                 hdim,
-                sample_dofs_H,
-                num_sample_dofs_per_proc_H,
+                sample_dofs,
+                num_sample_dofs_per_proc,
                 *Hsinv,
                 myid,
                 num_procs,
@@ -727,8 +729,8 @@ int main(int argc, char* argv[])
         {
             CAROM::DEIM(H_librom,
                 hdim,
-                sample_dofs_H,
-                num_sample_dofs_per_proc_H,
+                sample_dofs,
+                num_sample_dofs_per_proc,
                 *Hsinv,
                 myid,
                 num_procs);
@@ -748,11 +750,11 @@ int main(int argc, char* argv[])
         num_sample_dofs_per_proc_empty.assign(num_procs, 0);
 
 
-        smm->RegisterSampledVariable("V", FESPACE, sample_dofs,
+        smm->RegisterSampledVariable("V", FSPACE, sample_dofs,
             num_sample_dofs_per_proc); // NOTE: Probably not needed
-        smm->RegisterSampledVariable("X", FESPACE, sample_dofs,
+        smm->RegisterSampledVariable("X", FSPACE, sample_dofs,
             num_sample_dofs_per_proc);
-        smm->RegisterSampledVariable("H", FESPACE, sample_dofs,
+        smm->RegisterSampledVariable("H", FSPACE, sample_dofs,
             num_sample_dofs_per_proc); // NOTE: Probably not needed
     
         smm->ConstructSampleMesh();
@@ -761,7 +763,7 @@ int main(int argc, char* argv[])
         w_v = new CAROM::Vector(rvdim, false);
         w_x = new CAROM::Vector(rxdim, false);
 
-        // Initialize w = B_W^T p.
+        // Initialize w = B_W^T vx.
         BV_librom->transposeMult(*v_W_librom, *w_v);
         BX_librom->transposeMult(*x_W_librom, *w_x);
 
@@ -784,8 +786,8 @@ int main(int argc, char* argv[])
                 //    boundary conditions on a beam-like mesh (see description above).
                 BlockVector sp_vx(true_offset);
                 ParGridFunction sp_v_gf, sp_x_gf;
-                sp_v_gf.MakeTRef(&sp_XV_space, sp_vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction.
-                sp_x_gf.MakeTRef(&sp_XV_space, sp_vx, true_offset[1]);
+                sp_v_gf.MakeTRef(sp_XV_space, sp_vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction.
+                sp_x_gf.MakeTRef(sp_XV_space, sp_vx, true_offset[1]);
 
 
                 VectorFunctionCoefficient velo(dim, InitialVelocity);
@@ -800,18 +802,17 @@ int main(int argc, char* argv[])
             }
 
             // Define operator
-            soper = new HyperelasticOperator oper(*sp_FEspace, ess_bdr, visc, mu, K);
+            soper = new HyperelasticOperator oper(**sp_FEspace, ess_bdr, visc, mu, K);
 
         }
 
 
         romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm,
-            BV_librom, BX_librom, H_librom,
+            BV_librom, BX_librom, H_librom, w_v, w_x,
             Hsinv, myid, num_samples_req != -1); 
 
         ode_solver->Init(*romop); 
 
-        delete readerH;
     }
     else  // fom
         ode_solver->Init(oper); 
@@ -860,8 +861,8 @@ int main(int argc, char* argv[])
             // Take samples
             if (basis_generator_v->isNextSample(t))
             {
-                basis_generator_v->takeSample(v->GetData(), t, dt); 
-                basis_generator_v->computeNextSampleTime(vx->GetBlock(0), dxdt.GetData(), t);
+                basis_generator_v->takeSample(vx.GetBlock(0), t, dt);
+                basis_generator_v->computeNextSampleTime(vx.GetBlock(0), dxdt.GetData(), t);
 
                 oper.CopyH_t(H_t);
                 basis_generator_H->takeSample(H_t.GetData(), t, dt);
@@ -869,8 +870,8 @@ int main(int argc, char* argv[])
 
             if (basis_generator_x->isNextSample(t))
             {
-                basis_generator_x->takeSample(vx->GetBlock(1), t, dt);
-                basis_generator_x->computeNextSampleTime(x->GetData(), dxdt.GetData(), t);
+                basis_generator_x->takeSample(vx.GetBlock(1), t, dt);
+                basis_generator_x->computeNextSampleTime(vx.GetBlock(1), dxdt.GetData(), t);
 
             }
         }
@@ -1110,8 +1111,6 @@ void HyperelasticOperator::GetElasticEnergyDensity(
 
 HyperelasticOperator::~HyperelasticOperator()
 {
-    delete J_solver;
-    delete J_prec;
     delete model;
     delete Mmat;
 }
@@ -1149,7 +1148,7 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 RomOperator::RomOperator(HyperelasticOperator* fom_,
     HyperelasticOperator* fomSp_, const int rrdim_,
-    CAROM::SampleMeshManager* smm_, const Vector double x0_, const Vector double v0_,
+    CAROM::SampleMeshManager* smm_, const Vector x0_, const Vector v0_,
     const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
     const CAROM::Matrix* Hsinv,
     const int myid, const bool oversampling_)
@@ -1257,7 +1256,7 @@ RomOperator::~RomOperator()
 void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 {
     // Check that the sizes match
-    MFEM_VERIFY(dy_dt.Size() == rvdim + rxdim && res.Size() == rvdim + rxdim, "");
+    MFEM_VERIFY(vx.Size() == rvdim + rxdim && dvx_dt.Size() == rvdim + rxdim, "");
 
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
     Vector v(vx.GetData() + 0, rvdim);
@@ -1267,11 +1266,11 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x_sp.Mult(x, *z_x_librom);
-    V_v_sp.Mult(v, *z_v_librom);
+    V_x_sp->Mult(x, *z_x_librom);
+    V_v_sp->Mult(v, *z_v_librom);
 
     add(z_x_librom, x0, *psp_x_librom) // Store liftings
-        add(z_v_librom, v0, *psp_v_librom)
+    add(z_v_librom, v0, *psp_v_librom)
 
     // Hyperreduce H
     // Apply H to x to get zH
@@ -1311,7 +1310,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 {
     // Check that the sizes match
-    MFEM_VERIFY(dy_dt.Size() == rvdim + rxdim && res.Size() == rvdim + rxdim, "");
+    MFEM_VERIFY(vx.Size() == rvdim + rxdim && dvx_dt.Size() == rvdim + rxdim, "");
 
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
     Vector v(vx.GetData() + 0, rvdim);
