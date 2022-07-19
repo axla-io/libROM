@@ -86,6 +86,8 @@ private:
     mutable Vector z_x;
     mutable Vector z_v;
 
+    CAROM::Vector* z_librom;
+
     bool hyperreduce;
 
     CAROM::Vector* pfom_librom, * pfom_x_librom, * pfom_v_librom;
@@ -1297,8 +1299,8 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x_sp->mult(x, *z_x);
-    V_v_sp->mult(v, *z_v);
+    V_x_sp->mult(x, *z_x); // TODO: Wrap V_x in an MFEM matrix
+    V_v_sp->mult(v, *z_v); // TODO: Wrap V_x in an MFEM matrix
 
     add(z_x, x0, *psp_x); // Store liftings
     add(z_v, v0, *psp_v);
@@ -1321,13 +1323,13 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     }
 
     // Multiply by V_v^T * U_H
-    V_vTU_H.mult(zX, z); 
+    V_vTU_H.mult(zX, z);  // TODO: Wrap this in an MFEM matrix
 
 
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z, v); 
+        S_hat->multPlus(z, v); // TODO: Wrap S_hat in an MFEM matrix
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
@@ -1351,21 +1353,21 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x.mult(x, *z_x);
-    V_v.mult(v, *z_v);
+    V_x.mult(x, *z_x); // TODO: Wrap V_x in an MFEM matrix
+    V_v.mult(v, *z_v); // TODO: Wrap V_v in an MFEM matrix
 
     add(z_x, x0, *pfom_x); // Store liftings
     add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
     fom->H.Mult(*pfom_x, zfom_x);
-    V_x.transposeMult(*zfom_x_librom, z);
+    V_x.transposeMult(*zfom_x, z); // TODO: Wrap V_x in an MFEM matrix
 
 
     if (fomSp->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z, v);
+        S_hat->multPlus(z, v); // TODO: Wrap S_hat in an MFEM matrix
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
 
