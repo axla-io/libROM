@@ -525,13 +525,13 @@ int main(int argc, char* argv[])
     Vector H_t;
 
     // NOTE: Likely problems here...
-    CAROM::Vector v_librom = new CAROM::Vector(v_gf.GetTrueVector());
+    Vector v_W(v_gf.GetTrueVector());
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
-    CAROM::Vector v_W_librom = new CAROM::Vector(&((*v_librom)(true_size)), true_size, true, false);
+    CAROM::Vector v_W_librom = new CAROM::Vector(&((*v_W)(true_size)), true_size, true, false);
 
-    CAROM::Vector x_librom = new CAROM::Vector(x_gf.GetTrueVector());
+    Vector x_W(x_gf.GetTrueVector());
     //x.SetDataAndSize(&((*x_librom)(0)), true_size);
-    CAROM::Vector x_W_librom = new CAROM::Vector(&((*x_librom)(true_size)), true_size, true, false);
+    CAROM::Vector x_W_librom = new CAROM::Vector(&((*x_W)(true_size)), true_size, true, false);
 
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
