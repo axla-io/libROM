@@ -54,6 +54,18 @@ public:
     void GetElasticEnergyDensity(const ParGridFunction& x,
         ParGridFunction& w) const;
 
+
+    void SetDvxDt(Vector& dvxdt) 
+    {
+        dvxdt_prev = dvxdt;
+    }
+
+    void SetH_t(Vector& H_t)
+    {
+        H_prev = H_t;
+    }
+
+
     void CopyDvxDt(Vector& dvxdt) const
     {
         dvxdt = dvxdt_prev;
@@ -1081,7 +1093,7 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
     H.Mult(x, z);
-    H_prev = z; // Store H for sampling
+    SetH_t(z); // Store H for sampling
 
     if (viscosity != 0.0)
     {
@@ -1092,7 +1104,8 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     M_solver.Mult(z, dv_dt);
 
     dx_dt = v;
-    dvxdt_prev = dvx_dt;
+    SetDvxDt(dvx_dt);
+
 }
 
 
