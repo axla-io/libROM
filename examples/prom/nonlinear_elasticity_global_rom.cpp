@@ -778,8 +778,8 @@ int main(int argc, char* argv[])
         w_x = new CAROM::Vector(rxdim, false);
 
         // Initialize w = B_W^T vx.
-        BV_librom->transposeMult(*v_gf.SetTrueVector(); , *w_v);
-        BX_librom->transposeMult(*x_gf.SetTrueVector(); , *w_x);
+        BV_librom->transposeMult(v_gf.GetTrueVector(); , *w_v);
+        BX_librom->transposeMult(x_gf.GetTrueVector(); , *w_x);
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
