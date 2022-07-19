@@ -523,11 +523,6 @@ int main(int argc, char* argv[])
     CAROM::Vector* w_v = 0;
     CAROM::Vector* w_x = 0;
     Vector* H_t = 0;
-
-
-    
-    CAROM::Vector* v_W_librom = 0;
-    CAROM::Vector* x_W_librom = 0;
     
 
 
