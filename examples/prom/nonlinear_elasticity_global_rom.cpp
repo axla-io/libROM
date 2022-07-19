@@ -29,7 +29,6 @@ class HyperelasticOperator : public TimeDependentOperator
     
 protected:
     ParBilinearForm M, S;
-    ParNonlinearForm H;
     HyperelasticModel* model;
 
     HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
@@ -59,6 +58,7 @@ public:
     ParFiniteElementSpace& fespace;
     double viscosity;
     Array<int> ess_tdof_list;
+    ParNonlinearForm H;
 
     virtual ~HyperelasticOperator();
 };
@@ -92,8 +92,8 @@ private:
     Vector* pfom;
     Vector* pfom_x;
     Vector* pfom_v;
-    mutable Vector zfomx;
-    mutable Vector zfomv;
+    mutable Vector zfom_x;
+    mutable Vector zfom_v;
     CAROM::Vector* zfom_x_librom;
 
     CAROM::SampleMeshManager* smm;
@@ -1260,7 +1260,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         
         pfom_x = new Vector(pfom->GetData(), fdim / 2);
         pfom_v = new Vector(pfom->GetData() + fdim / 2, fdim / 2);
-        zfomx = new Vector(fdim / 2);
+        zfom_x = new Vector(fdim / 2);
 
 
         pfom_x_librom = new CAROM::Vector(pfom_x->GetData(), pfom_x->Size(), false,
@@ -1300,12 +1300,12 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     V_x_sp->mult(x, *z_x);
     V_v_sp->mult(v, *z_v);
 
-    add(z_x, x0, *psp_x) // Store liftings
-    add(z_v, v0, *psp_v)
+    add(z_x, x0, *psp_x); // Store liftings
+    add(z_v, v0, *psp_v);
 
     // Hyperreduce H
     // Apply H to x to get zH
-    fomSp->H->Mult(*psp_x, zH);
+    fomSp->H.Mult(*psp_x, zH);
 
     // Sample the values from zH
     smm->GetSampledValues("X", zH, zN);
@@ -1358,7 +1358,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
-    fom->H->Mult(*pfom_x, zfom_x);
+    fom->H.Mult(*pfom_x, zfom_x);
     V_x.transposeMult(*zfom_x_librom, z);
 
 
