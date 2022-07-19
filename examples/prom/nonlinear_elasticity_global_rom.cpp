@@ -522,7 +522,7 @@ int main(int argc, char* argv[])
     CAROM::Vector* w = 0;
     CAROM::Vector* w_v = 0;
     CAROM::Vector* w_x = 0;
-    Vector* H_t = 0;
+    Vector H_t = new Vector(true_size * 2);
 
 
     
@@ -774,8 +774,8 @@ int main(int argc, char* argv[])
         w_x = new CAROM::Vector(rxdim, false);
 
         // Initialize w = B_W^T vx.
-        BV_librom->transposeMult(v_w_librom, *w_v);
-        BX_librom->transposeMult(x_w_librom, *w_x);
+        BV_librom->transposeMult(v_W_librom, *w_v);
+        BX_librom->transposeMult(x_W_librom, *w_x);
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
@@ -788,7 +788,7 @@ int main(int argc, char* argv[])
 
         if (myid == 0)
         {
-            sp_XV_space = smm->GetSampleFESpace(FESPACE);
+            sp_XV_space = smm->GetSampleFESpace(FSPACE);
 
             // Initialize sp_p with initial conditions.
             {
