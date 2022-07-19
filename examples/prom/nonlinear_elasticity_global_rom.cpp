@@ -534,7 +534,7 @@ int main(int argc, char* argv[])
     CAROM::Vector* w = 0;
     CAROM::Vector* w_v = 0;
     CAROM::Vector* w_x = 0;
-    Vector H_t = new Vector(true_size * 2);
+    Vector * H_t = new Vector(true_size * 2);
 
 
     
@@ -548,8 +548,8 @@ int main(int argc, char* argv[])
     Vector * x_W = new Vector(v_gf.GetTrueVector());
 
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
-    v_W_librom = new CAROM::Vector(v_W.GetData(), v_W.Size(), true, false);
-    x_W_librom = new CAROM::Vector(x_W.GetData(), x_W.Size(), true, false);
+    v_W_librom = new CAROM::Vector(v_W->GetData(), v_W->Size(), true, false);
+    x_W_librom = new CAROM::Vector(x_W->GetData(), x_W->Size(), true, false);
 
 
 
@@ -786,13 +786,13 @@ int main(int argc, char* argv[])
         w_x = new CAROM::Vector(rxdim, false);
 
         // Initialize w = B_W^T vx.
-        BV_librom->transposeMult(v_W_librom, *w_v);
-        BX_librom->transposeMult(x_W_librom, *w_x);
+        BV_librom->transposeMult(*v_W_librom, *w_v);
+        BX_librom->transposeMult(*x_W_librom, *w_x);
 
-        /*
-        delete v_w;
-        delete x_w;
-        */
+        
+        delete v_W;
+        delete x_W;
+        
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
@@ -998,6 +998,7 @@ int main(int argc, char* argv[])
     // 16. Free the used memory.
     delete ode_solver;
     delete pmesh;
+    delete H_t;
 
     MPI_Finalize();
 
