@@ -686,7 +686,7 @@ int main(int argc, char* argv[])
 
         // Hyper reduce H
         CAROM::BasisReader readerH("basisH");
-        H_librom = readerH->getSpatialBasis(0.0);
+        H_librom = readerH.getSpatialBasis(0.0);
 
         // Compute sample points using DEIM
 
@@ -778,8 +778,8 @@ int main(int argc, char* argv[])
         w_x = new CAROM::Vector(rxdim, false);
 
         // Initialize w = B_W^T vx.
-        BV_librom->transposeMult(v_gf.GetTrueVector(); , *w_v);
-        BX_librom->transposeMult(x_gf.GetTrueVector(); , *w_x);
+        BV_librom->transposeMult(v_gf.GetTrueVector(), *w_v);
+        BX_librom->transposeMult(x_gf.GetTrueVector(), *w_x);
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
