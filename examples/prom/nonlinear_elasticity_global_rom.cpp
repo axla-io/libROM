@@ -82,6 +82,7 @@ private:
     mutable CAROM::Vector zX;
     mutable CAROM::Vector zN;
     const CAROM::Matrix* Hsinv;
+    mutable CAROM::Vector z_librom;
     mutable Vector z;
     mutable Vector z_x;
     mutable Vector z_v;
@@ -1230,7 +1231,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         // Allocate auxillary vectors
         z_x_librom = new CAROM::Vector(spdim / 2, false);
         z_v_librom = new CAROM::Vector(spdim / 2, false);
-        z = new Vector(spdim / 2);
+        z_librom = new CAROM::Vector(spdim / 2, false);
+        z = new Vector(z_librom->getData(), spdim / 2);
         z_v = new Vector(spdim / 2);
         z_x = new Vector(spdim / 2);
 
@@ -1292,15 +1294,19 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     MFEM_VERIFY(vx.Size() == rvdim + rxdim && dvx_dt.Size() == rvdim + rxdim, "");
 
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
-    Vector v(vx.GetData() + 0, rvdim);
-    Vector x(vx.GetData() + rvdim, rxdim);
+    //Vector v(vx.GetData() + 0, rvdim);
+    //Vector x(vx.GetData() + rvdim, rxdim);
+    CAROM::Vector v_librom(vx.GetData(), rvdim, false, false);
+    CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
 
+
+
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x_sp->mult(x, *z_x); // TODO: Wrap V_x in an MFEM matrix
-    V_v_sp->mult(v, *z_v); // TODO: Wrap V_x in an MFEM matrix
+    V_v_sp->mult(v_librom, *z_v_librom); 
+    V_x_sp->mult(x_librom, *z_x_librom);
 
     add(z_x, x0, *psp_x); // Store liftings
     add(z_v, v0, *psp_v);
@@ -1323,13 +1329,13 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     }
 
     // Multiply by V_v^T * U_H
-    V_vTU_H.mult(zX, z);  // TODO: Wrap this in an MFEM matrix
+    V_vTU_H.mult(zX, z_librom);
 
 
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z, v); // TODO: Wrap S_hat in an MFEM matrix
+        S_hat->multPlus(z_librom, v_librom); // TODO: Wrap S_hat in an MFEM matrix
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
