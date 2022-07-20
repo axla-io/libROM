@@ -1227,12 +1227,19 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         H_prev(spdim / 2);
 
         // Allocate auxillary vectors
-        z_x_librom = new CAROM::Vector(spdim / 2, false);
-        z_v_librom = new CAROM::Vector(spdim / 2, false);
-        z_librom = new CAROM::Vector(spdim / 2, false);
-        z = new Vector(&((*z_librom)(0)), spdim / 2);
-        z_v = new Vector(&((*z_v_librom)(0)), spdim / 2);
-        z_x = new Vector(&((*z_x_librom)(0)), spdim / 2);
+        //z_x_librom = new CAROM::Vector(spdim / 2, false);
+        //z_v_librom = new CAROM::Vector(spdim / 2, false);
+        //z_librom = new CAROM::Vector(spdim / 2, false);
+        //z = new Vector(&((*z_librom)(0)), spdim / 2);
+        //z_v = new Vector(&((*z_v_librom)(0)), spdim / 2);
+        //z_x = new Vector(&((*z_x_librom)(0)), spdim / 2);
+
+        z = new Vector(spdim / 2);
+        z_v = new Vector(spdim / 2);
+        z_x = new Vector(spdim / 2);
+        z_librom = new CAROM::Vector(z->GetData(), z->Size(), false, false);
+        z_v_librom = new CAROM::Vector(z_v->GetData(), z_v->Size(), false, false);
+        z_x_librom = new CAROM::Vector(z_x->GetData(), z_x->Size(), false, false);
 
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
@@ -1303,7 +1310,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_v_sp->mult(v_librom, *z_v_librom); 
+    V_v_sp->mult(v_librom, z_v_librom); 
     V_x_sp->mult(x_librom, z_x_librom);
 
     add(z_x, x0, *psp_x); // Store liftings
