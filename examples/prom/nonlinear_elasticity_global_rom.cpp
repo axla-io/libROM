@@ -99,8 +99,8 @@ private:
 
     CAROM::SampleMeshManager* smm;
 
-    mutable Vector z_v_librom;
-    mutable Vector z_x_librom;
+    CAROM::Vector* z_v_librom;
+    CAROM::Vector* z_x_librom;
     
 
 
