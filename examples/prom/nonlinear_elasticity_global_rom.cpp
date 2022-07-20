@@ -1310,8 +1310,8 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_v_sp->mult(v_librom, z_v_librom); 
-    V_x_sp->mult(x_librom, z_x_librom);
+    V_v_sp->mult(v_librom, *z_v_librom); 
+    V_x_sp->mult(x_librom, *z_x_librom);
 
     add(z_x, x0, *psp_x); // Store liftings
     add(z_v, v0, *psp_v);
