@@ -87,8 +87,6 @@ private:
     mutable Vector z_x;
     mutable Vector z_v;
 
-    CAROM::Vector* z_librom;
-
     bool hyperreduce;
 
     CAROM::Vector* pfom_librom, * pfom_x_librom, * pfom_v_librom;
