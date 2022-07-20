@@ -69,7 +69,7 @@ public:
 class RomOperator : public TimeDependentOperator
 {
 private:
-    int rxdim, rvdim;
+    int rxdim, rvdim, hdim;
     int nsamp_H;
     double current_dt;
     bool oversampling;
@@ -787,8 +787,8 @@ int main(int argc, char* argv[])
         wMFEM = new Vector(&((*w)(0)), rxdim + rvdim); 
 
         // Get initial conditions
-        Vector w_v0(wMFEM.GetData() + 0, rvdim);
-        Vector w_x0(wMFEM.GetData() + rvdim, rxdim);
+        Vector w_v0(wMFEM->GetData() + 0, rvdim);
+        Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
 
         if (myid == 0)
         {
@@ -1187,7 +1187,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     const int myid, const bool oversampling_)
     : TimeDependentOperator(rxdim_ + rvdim_, 0.0),
     fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_),
-    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(*U_H_),
+    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(U_H_),
     zN(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
     oversampling(oversampling_), z(height / 2)
 {
@@ -1197,12 +1197,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
         V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
 
-        z = new Vector(spdim / 2);
-        z_v = new Vector(spdim / 2);
-        z_x = new Vector(spdim / 2);
-        z_librom = new CAROM::Vector(z->GetData(), z->Size(), false, false);
-        z_v_librom = new CAROM::Vector(z_v->GetData(), z_v->Size(), false, false);
-        z_x_librom = new CAROM::Vector(z_x->GetData(), z_x->Size(), false, false);
+        
     }
 
     // Gather distributed vectors
@@ -1227,8 +1222,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     M_hat_solver.SetAbsTol(0.0);
     M_hat_solver.SetMaxIter(30);
     M_hat_solver.SetPrintLevel(0);
-    M_prec.SetType(HypreSmoother::Jacobi);
-    M_hat_solver.SetPreconditioner(M_prec);
+    M_hat_prec.SetType(HypreSmoother::Jacobi);
+    M_hat_solver.SetPreconditioner(M_hat_prec);
     M_hat_solver.SetOperator(*M_hat);
 
 
@@ -1247,6 +1242,13 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         //z = new Vector(&((*z_librom)(0)), spdim / 2);
         //z_v = new Vector(&((*z_v_librom)(0)), spdim / 2);
         //z_x = new Vector(&((*z_x_librom)(0)), spdim / 2);
+
+        z = new Vector(spdim / 2);
+        z_v = new Vector(spdim / 2);
+        z_x = new Vector(spdim / 2);
+        z_librom = new CAROM::Vector(z.GetData(), z.Size(), false, false);
+        z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
+        z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
 
        
 
@@ -1269,6 +1271,13 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     if (!hyperreduce)
     {
         const int fdim = fom->Height(); // Unreduced height
+
+        z= new Vector(fdim / 2);
+        z_v = new Vector(fdim / 2);
+        z_x = new Vector(fdim / 2);
+        z_librom = new CAROM::Vector(z.GetData(), z.Size(), false, false);
+        z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
+        z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
 
         // This is for saving the recreated predictions
         pfom_librom = new CAROM::Vector(fdim, false);
