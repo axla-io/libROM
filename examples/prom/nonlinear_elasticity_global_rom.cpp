@@ -82,7 +82,7 @@ private:
     mutable CAROM::Vector zX;
     mutable CAROM::Vector zN;
     const CAROM::Matrix* Hsinv;
-    mutable CAROM::Vector z_librom;
+    mutable CAROM::Vector* z_librom;
     mutable Vector z;
     mutable Vector z_x;
     mutable Vector z_v;
@@ -1295,7 +1295,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
             false);
         pfom_v_librom = new CAROM::Vector(pfom_v->GetData(), pfom_v->Size(), false,
             false);
-        zfom_x_librom = new CAROM::Vector(zfom_x->GetData(), zfomx->Size(), false,
+        zfom_x_librom = new CAROM::Vector(zfom_x->GetData(), zfom_x->Size(), false,
             false);
     }
 
