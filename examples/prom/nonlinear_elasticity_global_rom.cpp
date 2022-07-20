@@ -1189,6 +1189,13 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     {
         V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
         V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
+
+        z = new Vector(spdim / 2);
+        z_v = new Vector(spdim / 2);
+        z_x = new Vector(spdim / 2);
+        z_librom = new CAROM::Vector(z->GetData(), z->Size(), false, false);
+        z_v_librom = new CAROM::Vector(z_v->GetData(), z_v->Size(), false, false);
+        z_x_librom = new CAROM::Vector(z_x->GetData(), z_x->Size(), false, false);
     }
 
     // Gather distributed vectors
@@ -1234,12 +1241,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         //z_v = new Vector(&((*z_v_librom)(0)), spdim / 2);
         //z_x = new Vector(&((*z_x_librom)(0)), spdim / 2);
 
-        z = new Vector(spdim / 2);
-        z_v = new Vector(spdim / 2);
-        z_x = new Vector(spdim / 2);
-        z_librom = new CAROM::Vector(z->GetData(), z->Size(), false, false);
-        z_v_librom = new CAROM::Vector(z_v->GetData(), z_v->Size(), false, false);
-        z_x_librom = new CAROM::Vector(z_x->GetData(), z_x->Size(), false, false);
+       
 
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
@@ -1358,27 +1360,30 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
     Vector v(vx.GetData() + 0, rvdim);
-    Vector x(vx.GetData() + rvdim, rxdim);
+    //Vector x(vx.GetData() + rvdim, rxdim);
+    CAROM::Vector v_librom(vx.GetData(), rvdim, false, false);
+    CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x.mult(x, *z_x); // TODO: Wrap V_x in an MFEM matrix
-    V_v.mult(v, *z_v); // TODO: Wrap V_v in an MFEM matrix
+    V_x.mult(x, *z_x_librom); 
+    V_v.mult(v, *z_v_librom); 
+
 
     add(z_x, x0, *pfom_x); // Store liftings
     add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
     fom->H.Mult(*pfom_x, zfom_x);
-    V_x.transposeMult(*zfom_x, z); // TODO: Wrap V_x in an MFEM matrix
+    V_x.transposeMult(*zfom_x, z_librom); 
 
 
     if (fomSp->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z, v); // TODO: Wrap S_hat in an MFEM matrix
+        S_hat->multPlus(z_librom, v_librom); 
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
 
