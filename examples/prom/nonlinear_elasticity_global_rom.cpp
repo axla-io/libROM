@@ -60,6 +60,7 @@ public:
     Array<int> ess_tdof_list;
     ParNonlinearForm H;
     HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
+    HypreParMatrix* Smat; 
 
     virtual ~HyperelasticOperator();
 };
@@ -108,6 +109,8 @@ private:
 protected:
     CAROM::Matrix* S_hat;
     CAROM::Matrix* M_hat;
+    CAROM::Matrix* M_hat_inv;
+    
     const CAROM::Matrix* U_H;
     Vector x0, v0;
     Vector H_prev;
@@ -1069,6 +1072,7 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     S.AddDomainIntegrator(new VectorDiffusionIntegrator(visc_coeff));
     S.Assemble(skip_zero_entries);
     S.Finalize(skip_zero_entries);
+    Smat = S.ParallelAssemble();
 
     dvxdt_prev = 0.0;
     H_prev = 0.0;
@@ -1210,22 +1214,12 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     // Create S_hat
     S_hat = new CAROM::Matrix(rvdim, rvdim, false);
-    Compute_CtAB(fom->S, V_v, V_v, S_hat); 
+    Compute_CtAB(fom->Smat, V_v, V_v, S_hat); 
 
     // Create M_hat
     M_hat = new CAROM::Matrix(rvdim, rvdim, false);
     Compute_CtAB(fom->Mmat, V_v, V_v, M_hat);
-
-    // Create M_hat_solver
-    const double rel_tol = 1e-8;
-    M_hat_solver.iterative_mode = false;
-    M_hat_solver.SetRelTol(rel_tol);
-    M_hat_solver.SetAbsTol(0.0);
-    M_hat_solver.SetMaxIter(30);
-    M_hat_solver.SetPrintLevel(0);
-    M_hat_prec.SetType(HypreSmoother::Jacobi);
-    M_hat_solver.SetPreconditioner(M_hat_prec);
-    M_hat_solver.SetOperator(*M_hat);
+    M_hat->inverse(M_hat_inv);
 
 
     if (myid == 0)
@@ -1251,8 +1245,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
         z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
 
-       
-
+      
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
         psp = new Vector(&((*psp_librom)(0)), spdim);
@@ -1309,6 +1302,7 @@ RomOperator::~RomOperator()
 {
     delete S_hat;
     delete M_hat;
+    delete M_hat_inv;
 }
 
 
@@ -1325,7 +1319,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
-
+    CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
 
 
     // Lift the x-, and v-vectors
@@ -1360,11 +1354,11 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z_librom, v_librom, 1.0); // TODO: Wrap S_hat in an MFEM matrix
+        S_hat->multPlus(*z_librom, v_librom, 1.0); // TODO: Wrap S_hat in an MFEM matrix
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
-    M_hat_solver.Mult(z, dv_dt); // to invert reduced mass matrix operator.
+    M_hat_inv.Mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
 
     dx_dt = v;
 }
@@ -1383,6 +1377,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
+    CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
@@ -1401,12 +1396,12 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     if (fomSp->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z_librom, v_librom, 1.0); 
+        S_hat->multPlus(*z_librom, v_librom, 1.0); 
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
 
     z.Neg(); // z = -z, because we are calculating the residual.
-    M_hat_solver.Mult(z, dv_dt); // to invert reduced mass matrix operator.
+    M_hat_inv.Mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
 
     dx_dt = v;
 }
