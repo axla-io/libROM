@@ -271,7 +271,7 @@ int main(int argc, char* argv[])
     int ser_ref_levels = 2;
     int par_ref_levels = 0;
     int order = 2;
-    int ode_solver_type = 3;
+    int ode_solver_type = 14;
     double t_final = 300.0;
     double dt = 3.0;
     double visc = 1e-2;
