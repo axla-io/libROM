@@ -460,14 +460,12 @@ int main(int argc, char* argv[])
     true_offset[1] = true_size;
     true_offset[2] = 2 * true_size;
 
-    cout << 1 << endl;
 
     BlockVector vx(true_offset);
     ParGridFunction v_gf, x_gf;
     v_gf.MakeTRef(&fespace, vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction. 
     x_gf.MakeTRef(&fespace, vx, true_offset[1]);
 
-    cout << 2 << endl;
 
     ParGridFunction x_ref(&fespace);
     pmesh->GetNodes(x_ref);
@@ -476,7 +474,6 @@ int main(int argc, char* argv[])
     ParFiniteElementSpace w_fespace(pmesh, &w_fec);
     ParGridFunction w_gf(&w_fespace);
 
-    cout << 3 << endl;
 
     // Basis params
     bool update_right_SV = false;
@@ -484,7 +481,6 @@ int main(int argc, char* argv[])
     const std::string basisFileName = "basis" + std::to_string(id_param);
     int max_num_snapshots = int(t_final / dt) + 2;
 
-    cout << 4 << endl;
 
     // The merge phase
     if (merge)
@@ -537,13 +533,13 @@ int main(int argc, char* argv[])
     CAROM::Vector* x_W_librom = 0;
     
 
-    cout << 5 << endl;
+    
 
     // NOTE: Likely problems here...
     Vector * v_W = new Vector(v_gf.GetTrueVector());
     Vector * x_W = new Vector(v_gf.GetTrueVector());
 
-    cout << 6 << endl;
+    
 
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
     v_W_librom = new CAROM::Vector(v_W->GetData(), v_W->Size(), true, false);
@@ -556,11 +552,15 @@ int main(int argc, char* argv[])
     HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
     HyperelasticOperator* soper = 0;
 
+    cout << 8 << endl;
+
     // Fill dvdt and dxdt
     Vector dvxdt(true_size * 2);
     oper.GetH_dvxdt(vx, dvxdt, *H_t);
     Vector dvdt(dvxdt.GetData() + 0, true_size);
     Vector dxdt(dvxdt.GetData() + true_size, true_size);
+
+    cout << 9 << endl;
 
     socketstream vis_v, vis_w;
     if (visualization)
@@ -607,6 +607,9 @@ int main(int argc, char* argv[])
 
     double ee0 = oper.ElasticEnergy(x_gf);
     double ke0 = oper.KineticEnergy(v_gf);
+
+    cout << 10 << endl;
+
     if (myid == 0)
     {
         cout << "initial elastic energy (EE) = " << ee0 << endl;
@@ -614,11 +617,14 @@ int main(int argc, char* argv[])
         cout << "initial   total energy (TE) = " << (ee0 + ke0) << endl;
     }
 
+    cout << 10 << endl;
 
     // 10. Create pROM object.
     CAROM::BasisGenerator* basis_generator_v = 0;  
     CAROM::BasisGenerator* basis_generator_x = 0;
     CAROM::BasisGenerator* basis_generator_H = 0; 
+
+    cout << 11 << endl;
 
 
     if (offline) {
@@ -638,6 +644,8 @@ int main(int argc, char* argv[])
 
     }
 
+    cout << 12 << endl;
+
 
     RomOperator* romop = 0;
 
@@ -652,6 +660,7 @@ int main(int argc, char* argv[])
 
     CAROM::SampleMeshManager* smm = nullptr;
 
+    cout << 13 << endl;
 
     // The online phase
     if (online)
@@ -847,6 +856,8 @@ int main(int argc, char* argv[])
     else  // fom
         ode_solver->Init(oper); 
 
+    cout << 14 << endl;
+
 
     // 11. Perform time-integration
     //     (looping over the time iterations, ti, with a time-step dt).
@@ -857,6 +868,8 @@ int main(int argc, char* argv[])
     vector<double> ts;
     oper.SetTime(t);
     ode_solver->Init(oper);
+
+    cout << 15 << endl;
 
     bool last_step = false;
     for (int ti = 1; !last_step; ti++)
@@ -939,7 +952,7 @@ int main(int argc, char* argv[])
 
     }
 
-
+    cout << 16 << endl;
 
 
 
@@ -965,6 +978,7 @@ int main(int argc, char* argv[])
         delete basis_generator_H;
     }
 
+    cout << 17 << endl;
 
     // 12. Save the displaced mesh, the velocity and elastic energy.
     {
@@ -992,6 +1006,7 @@ int main(int argc, char* argv[])
         w_gf.Save(ee_ofs);
     }
 
+    cout << 18 << endl;
 
     // 16. Free the used memory.
     delete ode_solver;
@@ -1002,7 +1017,7 @@ int main(int argc, char* argv[])
 
 
 
-
+    cout << 19 << endl;
 
     return 1;
 }
