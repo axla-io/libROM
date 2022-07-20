@@ -545,7 +545,7 @@ int main(int argc, char* argv[])
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
-    //HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
+    HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
     HyperelasticOperator* soper = 0;
 
     cout << 8 << endl;
