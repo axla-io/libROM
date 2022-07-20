@@ -1299,7 +1299,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     MFEM_VERIFY(vx.Size() == rvdim + rxdim && dvx_dt.Size() == rvdim + rxdim, "");
 
     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
-    //Vector v(vx.GetData() + 0, rvdim);
+    Vector v(vx.GetData() + 0, rvdim);
     //Vector x(vx.GetData() + rvdim, rxdim);
     CAROM::Vector v_librom(vx.GetData(), rvdim, false, false);
     CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
@@ -1340,7 +1340,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z_librom, v_librom); // TODO: Wrap S_hat in an MFEM matrix
+        S_hat->multPlus(z_librom, v_librom, 1.0); // TODO: Wrap S_hat in an MFEM matrix
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
