@@ -527,12 +527,8 @@ int main(int argc, char* argv[])
     CAROM::Vector* w_x = 0;
     Vector * H_t = new Vector(true_size * 2);
 
-
-    
     CAROM::Vector* v_W_librom = 0;
     CAROM::Vector* x_W_librom = 0;
-    
-
     
 
     // NOTE: Likely problems here...
@@ -549,7 +545,7 @@ int main(int argc, char* argv[])
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
-    HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
+    //HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
     HyperelasticOperator* soper = 0;
 
     cout << 8 << endl;
