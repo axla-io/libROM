@@ -93,8 +93,8 @@ private:
     Vector* pfom;
     Vector* pfom_x;
     Vector* pfom_v;
-    mutable Vector zfom_x;
-    mutable Vector zfom_v;
+    mutable Vector* zfom_x;
+    mutable Vector* zfom_v;
     CAROM::Vector* zfom_x_librom;
 
     CAROM::SampleMeshManager* smm;
@@ -1368,8 +1368,8 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x.mult(x, *z_x_librom); 
-    V_v.mult(v, *z_v_librom); 
+    V_x.mult(x_librom, *z_x_librom); 
+    V_v.mult(v_librom, *z_v_librom); 
 
 
     add(z_x, x0, *pfom_x); // Store liftings
@@ -1383,7 +1383,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     if (fomSp->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
-        S_hat->multPlus(z_librom, v_librom); 
+        S_hat->multPlus(z_librom, v_librom, 1.0); 
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
 
