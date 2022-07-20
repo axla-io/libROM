@@ -528,11 +528,10 @@ int main(int argc, char* argv[])
     CAROM::Vector* v_W_librom = 0;
     CAROM::Vector* x_W_librom = 0;
     
-    /*
+
     // NOTE: Likely problems here...
     Vector * v_W = new Vector(v_gf.GetTrueVector());
     Vector * x_W = new Vector(v_gf.GetTrueVector());
-    */
 
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
     v_W_librom = new CAROM::Vector(v_W->GetData(), v_W->Size(), true, false);
