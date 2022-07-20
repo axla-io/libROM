@@ -1358,7 +1358,7 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
         z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z, because we are calculating the residual.
-    M_hat_inv->Mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
+    M_hat_inv->mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
 
     dx_dt = v;
 }
@@ -1401,7 +1401,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     }
 
     z.Neg(); // z = -z, because we are calculating the residual.
-    M_hat_inv->Mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
+    M_hat_inv->mult(z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
 
     dx_dt = v;
 }
