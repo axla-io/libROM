@@ -460,10 +460,14 @@ int main(int argc, char* argv[])
     true_offset[1] = true_size;
     true_offset[2] = 2 * true_size;
 
+    cout << 1 << endl;
+
     BlockVector vx(true_offset);
     ParGridFunction v_gf, x_gf;
     v_gf.MakeTRef(&fespace, vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction. 
     x_gf.MakeTRef(&fespace, vx, true_offset[1]);
+
+    cout << 2 << endl;
 
     ParGridFunction x_ref(&fespace);
     pmesh->GetNodes(x_ref);
@@ -472,12 +476,15 @@ int main(int argc, char* argv[])
     ParFiniteElementSpace w_fespace(pmesh, &w_fec);
     ParGridFunction w_gf(&w_fespace);
 
+    cout << 3 << endl;
 
     // Basis params
     bool update_right_SV = false;
     bool isIncremental = false;
     const std::string basisFileName = "basis" + std::to_string(id_param);
     int max_num_snapshots = int(t_final / dt) + 2;
+
+    cout << 4 << endl;
 
     // The merge phase
     if (merge)
@@ -530,16 +537,19 @@ int main(int argc, char* argv[])
     CAROM::Vector* x_W_librom = 0;
     
 
+    cout << 5 << endl;
 
     // NOTE: Likely problems here...
     Vector * v_W = new Vector(v_gf.GetTrueVector());
     Vector * x_W = new Vector(v_gf.GetTrueVector());
 
+    cout << 6 << endl;
+
     //v.SetDataAndSize(&((*v_librom)(0)), true_size);
     v_W_librom = new CAROM::Vector(v_W->GetData(), v_W->Size(), true, false);
     x_W_librom = new CAROM::Vector(x_W->GetData(), x_W->Size(), true, false);
 
-
+    cout << 7 << endl;
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
