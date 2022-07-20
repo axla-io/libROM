@@ -1243,9 +1243,9 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         //z_v = new Vector(&((*z_v_librom)(0)), spdim / 2);
         //z_x = new Vector(&((*z_x_librom)(0)), spdim / 2);
 
-        z = new Vector(spdim / 2);
-        z_v = new Vector(spdim / 2);
-        z_x = new Vector(spdim / 2);
+        z.SetSize(spdim / 2);
+        z_v.SetSize(spdim / 2);
+        z_x.SetSize(spdim / 2);
         z_librom = new CAROM::Vector(z.GetData(), z.Size(), false, false);
         z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
         z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
@@ -1273,8 +1273,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         const int fdim = fom->Height(); // Unreduced height
 
         z.SetSize(fdim / 2);
-        z_v = new Vector(fdim / 2);
-        z_x = new Vector(fdim / 2);
+        z_v.SetSize(fdim / 2);
+        z_x.SetSize(fdim / 2);
         z_librom = new CAROM::Vector(z.GetData(), z.Size(), false, false);
         z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
         z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
