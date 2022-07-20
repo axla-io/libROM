@@ -1272,6 +1272,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         pfom_x = new Vector(pfom->GetData(), fdim / 2);
         pfom_v = new Vector(pfom->GetData() + fdim / 2, fdim / 2);
         zfom_x = new Vector(fdim / 2);
+        zfom_x_librom = new CAROM::Vector(zfom_x->GetData(), zfom_x->Size(), false, false);
 
 
         pfom_x_librom = new CAROM::Vector(pfom_x->GetData(), pfom_x->Size(), false,
@@ -1376,8 +1377,8 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
-    fom->H.Mult(*pfom_x, zfom_x);
-    V_x.transposeMult(*zfom_x, z_librom); 
+    fom->H.Mult(*pfom_x, *zfom_x);
+    V_x.transposeMult(*zfom_x_librom, z_librom); 
 
 
     if (fomSp->viscosity != 0.0) 
