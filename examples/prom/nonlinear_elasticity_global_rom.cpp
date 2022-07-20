@@ -31,7 +31,7 @@ protected:
     ParBilinearForm M, S;
     HyperelasticModel* model;
 
-    HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
+    
     CGSolver M_solver;    // Krylov solver for inverting the mass matrix M
     HypreSmoother M_prec; // Preconditioner for the mass matrix M
 
@@ -59,6 +59,7 @@ public:
     double viscosity;
     Array<int> ess_tdof_list;
     ParNonlinearForm H;
+    HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
 
     virtual ~HyperelasticOperator();
 };
