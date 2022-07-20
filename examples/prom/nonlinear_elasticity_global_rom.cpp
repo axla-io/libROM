@@ -117,9 +117,10 @@ protected:
     HypreSmoother M_hat_prec; // Preconditioner for the reduced mass matrix M_hat
 
 public:
+
     RomOperator(HyperelasticOperator* fom_,
-        HyperelasticOperator* fomSp_, const int rrdim_,
-        CAROM::SampleMeshManager* smm_,
+        HyperelasticOperator* fomSp_, const int rxdim_, const int rvdim_, const int hdim_,
+        CAROM::SampleMeshManager* smm_, const Vector x0_, const Vector v0_,
         const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
         const CAROM::Matrix* Hsinv,
         const int myid, const bool oversampling_);
@@ -816,9 +817,11 @@ int main(int argc, char* argv[])
         }
 
 
-        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm,
-            BV_librom, BX_librom, H_librom, w_v, w_x,
+        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, w_v, w_x,
+            BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
+
+        
 
         ode_solver->Init(*romop); 
 
@@ -1173,13 +1176,13 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 
 RomOperator::RomOperator(HyperelasticOperator* fom_,
-    HyperelasticOperator* fomSp_, const int rrdim_,
+    HyperelasticOperator* fomSp_, const int rxdim_, const int rvdim_, const int hdim_,
     CAROM::SampleMeshManager* smm_, const Vector x0_, const Vector v0_,
     const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
     const CAROM::Matrix* Hsinv,
     const int myid, const bool oversampling_)
     : TimeDependentOperator(rrdim_ + rwdim_, 0.0),
-    fom(fom_), fomSp(fomSp_), rxdim(rrdim_), x0(x0_), v0(v0_), 
+    fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_),
     smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(*U_H_), .
     zN(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
     oversampling(oversampling_), z(height / 2)
