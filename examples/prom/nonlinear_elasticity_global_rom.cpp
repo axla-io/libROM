@@ -786,6 +786,10 @@ int main(int argc, char* argv[])
         // Note that some of this could be done only on the ROM solver process, but it is tricky, since RomOperator assembles Bsp in parallel.
         wMFEM = new Vector(&((*w)(0)), rxdim + rvdim); 
 
+        // Get initial conditions
+        Vector w_v0(wMFEM.GetData() + 0, rvdim);
+        Vector w_x0(wMFEM.GetData() + rvdim, rxdim);
+
         if (myid == 0)
         {
             sp_XV_space = smm->GetSampleFESpace(FSPACE);
@@ -817,7 +821,7 @@ int main(int argc, char* argv[])
         }
 
 
-        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, w_v, w_x,
+        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, w_v0, w_x0,
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
 
