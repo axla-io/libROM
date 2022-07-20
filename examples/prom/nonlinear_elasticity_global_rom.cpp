@@ -1181,9 +1181,9 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
     const CAROM::Matrix* Hsinv,
     const int myid, const bool oversampling_)
-    : TimeDependentOperator(rrdim_ + rwdim_, 0.0),
+    : TimeDependentOperator(rxdim_ + rvdim_, 0.0),
     fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_),
-    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(*U_H_), .
+    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(*U_H_),
     zN(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
     oversampling(oversampling_), z(height / 2)
 {
