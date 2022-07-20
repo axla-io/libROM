@@ -37,9 +37,6 @@ protected:
 
     mutable Vector z; // auxiliary vector
 
-    Vector dvxdt_prev; // for computing sample time
-    Vector H_prev; // for sampling H
-
 public:
     HyperelasticOperator(ParFiniteElementSpace& f, Array<int>& ess_bdr,
         double visc, double mu, double K);
@@ -1095,8 +1092,6 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     S.Finalize(skip_zero_entries);
     Smat = S.ParallelAssemble();
 
-    dvxdt_prev = 0.0;
-    H_prev = 0.0;
 }
 
 void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
