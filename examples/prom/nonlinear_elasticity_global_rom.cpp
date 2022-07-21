@@ -28,7 +28,7 @@ class HyperelasticOperator : public TimeDependentOperator
 {
     
 protected:
-    ParBilinearForm M, S;
+    ParBilinearForm *M, *S;
     HyperelasticModel* model;
 
     
@@ -52,10 +52,10 @@ public:
 
     void GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& H);
 
-    ParFiniteElementSpace& fespace;
+    ParFiniteElementSpace &fespace;
     double viscosity;
     Array<int> ess_tdof_list;
-    ParNonlinearForm H;
+    ParNonlinearForm *H;
     HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
     HypreParMatrix* Smat; 
 
@@ -110,7 +110,6 @@ protected:
     
     const CAROM::Matrix* U_H;
     Vector x0, v0;
-    Vector H_prev;
     HyperelasticOperator* fom;
     HyperelasticOperator* fomSp;
 
@@ -269,8 +268,8 @@ int main(int argc, char* argv[])
     int par_ref_levels = 0;
     int order = 2;
     int ode_solver_type = 14;
-    double t_final = 300.0;
-    double dt = 3.0;
+    double t_final = 1.0; // For debugging purposes
+    double dt = 0.03;
     double visc = 1e-2;
     double mu = 0.25;
     double K = 5.0;
@@ -280,7 +279,7 @@ int main(int argc, char* argv[])
     int vis_steps = 1;
 
     // ROM parameters
-    bool offline = true; // debug mode
+    bool offline = false; // debug mode
     bool merge = false;
     bool online = false;
     bool use_sopt = false;
@@ -349,6 +348,7 @@ int main(int argc, char* argv[])
         "Basis dimension for velocity solution space.");
     args.AddOption(&hdim, "-hdim", "--hdim",
         "Basis dimension for the nonlinear term.");
+    args.AddOption(&id_param, "-id", "--id", "Parametric index");
 
     args.Parse();
     if (!args.Good())
@@ -523,7 +523,7 @@ int main(int argc, char* argv[])
     CAROM::Vector* w = 0;
     CAROM::Vector* w_v = 0;
     CAROM::Vector* w_x = 0;
-    Vector * H_t = new Vector(true_size * 2);
+    Vector * H_t = new Vector(true_size);
 
     CAROM::Vector* v_W_librom = 0;
     CAROM::Vector* x_W_librom = 0;
@@ -537,22 +537,16 @@ int main(int argc, char* argv[])
     v_W_librom = new CAROM::Vector(v_W->GetData(), v_W->Size(), true, false);
     x_W_librom = new CAROM::Vector(x_W->GetData(), x_W->Size(), true, false);
 
-    cout << 7 << endl;
-
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
     HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
     HyperelasticOperator* soper = 0;
-
-    cout << 8 << endl;
 
     // Fill dvdt and dxdt
     Vector dvxdt(true_size * 2);
     oper.GetH_dvxdt(vx, dvxdt, *H_t);
     Vector dvdt(dvxdt.GetData() + 0, true_size);
     Vector dxdt(dvxdt.GetData() + true_size, true_size);
-
-    cout << 9 << endl;
 
     socketstream vis_v, vis_w;
     if (visualization)
@@ -600,7 +594,6 @@ int main(int argc, char* argv[])
     double ee0 = oper.ElasticEnergy(x_gf);
     double ke0 = oper.KineticEnergy(v_gf);
 
-    cout << 10 << endl;
 
     if (myid == 0)
     {
@@ -609,14 +602,11 @@ int main(int argc, char* argv[])
         cout << "initial   total energy (TE) = " << (ee0 + ke0) << endl;
     }
 
-    cout << 10 << endl;
 
     // 10. Create pROM object.
     CAROM::BasisGenerator* basis_generator_v = 0;  
     CAROM::BasisGenerator* basis_generator_x = 0;
     CAROM::BasisGenerator* basis_generator_H = 0; 
-
-    cout << 11 << endl;
 
 
     if (offline) {
@@ -636,8 +626,6 @@ int main(int argc, char* argv[])
 
     }
 
-    cout << 12 << endl;
-
 
     RomOperator* romop = 0;
 
@@ -652,7 +640,6 @@ int main(int argc, char* argv[])
 
     CAROM::SampleMeshManager* smm = nullptr;
 
-    cout << 13 << endl;
 
     // The online phase
     if (online)
@@ -671,7 +658,7 @@ int main(int argc, char* argv[])
         MFEM_VERIFY(BV_librom->numRows() == true_size, ""); 
 
         if (myid == 0)
-            printf("reduced V dim = %d\n", rxdim);
+            printf("reduced V dim = %d\n", rvdim);
 
 
         CAROM::BasisReader readerX("basisX");
@@ -769,14 +756,20 @@ int main(int argc, char* argv[])
         vector<int> num_sample_dofs_per_proc_empty;
         num_sample_dofs_per_proc_empty.assign(num_procs, 0);
 
+        // smm->RegisterSampledVariable("V", FSPACE, sample_dofs,
+        //     num_sample_dofs_per_proc); // NOTE: Probably not needed
+        // smm->RegisterSampledVariable("X", FSPACE, sample_dofs,
+        //     num_sample_dofs_per_proc);
+        // smm->RegisterSampledVariable("H", FSPACE, sample_dofs,
+        //     num_sample_dofs_per_proc); // NOTE: Probably not needed
 
-        smm->RegisterSampledVariable("V", FSPACE, sample_dofs,
+        smm->RegisterSampledVariable("V", 0, sample_dofs,
             num_sample_dofs_per_proc); // NOTE: Probably not needed
-        smm->RegisterSampledVariable("X", FSPACE, sample_dofs,
+        smm->RegisterSampledVariable("X", 0, sample_dofs,
             num_sample_dofs_per_proc);
-        smm->RegisterSampledVariable("H", FSPACE, sample_dofs,
+        smm->RegisterSampledVariable("H", 0, sample_dofs,
             num_sample_dofs_per_proc); // NOTE: Probably not needed
-    
+
         smm->ConstructSampleMesh();
 
         w = new CAROM::Vector(rxdim + rvdim, false);
@@ -788,9 +781,7 @@ int main(int argc, char* argv[])
         BX_librom->transposeMult(*x_W_librom, *w_x);
 
         
-        delete v_W;
-        delete x_W;
-        
+
 
         for (int i = 0; i < rvdim; ++i)
             (*w)(i) = (*w_v)(i);
@@ -802,12 +793,13 @@ int main(int argc, char* argv[])
         wMFEM = new Vector(&((*w)(0)), rxdim + rvdim); 
 
         // Get initial conditions
-        Vector w_v0(wMFEM->GetData() + 0, rvdim);
-        Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
+        //Vector w_v0(wMFEM->GetData() + 0, rvdim);
+        //Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
 
         if (myid == 0)
         {
-            sp_XV_space = smm->GetSampleFESpace(FSPACE);
+            //sp_XV_space = smm->GetSampleFESpace(FSPACE);
+            sp_XV_space = smm->GetSampleFESpace(0);
 
             // Initialize sp_p with initial conditions.
             {
@@ -836,52 +828,70 @@ int main(int argc, char* argv[])
         }
 
 
-        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, w_v0, w_x0,
+
+        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, *v_W, *x_W,
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
 
-        
 
         ode_solver->Init(*romop); 
 
+       
+        //delete readerV;
+        //delete readerX;
+        //delete readerH;
     }
-    else  // fom
+    else  
+    {
+        // fom
         ode_solver->Init(oper); 
+    }
+    
 
-    cout << 14 << endl;
 
 
     // 11. Perform time-integration
     //     (looping over the time iterations, ti, with a time-step dt).
     //     (taking samples and storing it into the pROM object)
     StopWatch fom_timer;
+    
+    cout << 11 << '\n';
 
     double t = 0.0;
     vector<double> ts;
     oper.SetTime(t);
-    ode_solver->Init(oper);
 
-    cout << 15 << endl;
+
 
     bool last_step = false;
     for (int ti = 1; !last_step; ti++)
     {
-        fom_timer.Start();
-
         double dt_real = min(dt, t_final - t);
-        ode_solver->Step(vx, t, dt_real);
-        last_step = (t >= t_final - 1e-8 * dt);
-
-        fom_timer.Stop();
 
         if (online)
         {   
             if (myid == 0)
             {
+                // TODO: Add timer here
                 ode_solver->Step(*wMFEM, t, dt_real);
             }
 
+            
+
             MPI_Bcast(&t, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+
+        }
+        else
+        {
+            fom_timer.Start();
+
+            
+            ode_solver->Step(vx, t, dt_real);
+            last_step = (t >= t_final - 1e-8 * dt);
+
+            fom_timer.Stop();
+
         }
 
         if (offline)
@@ -944,9 +954,8 @@ int main(int argc, char* argv[])
 
     }
 
-    cout << 16 << endl;
 
-
+    cout << 12 << '\n';
 
     if (offline)
     {
@@ -959,18 +968,16 @@ int main(int argc, char* argv[])
 
         basis_generator_x->takeSample(vx.GetBlock(1), t, dt);
 
-    
+        basis_generator_v->writeSnapshot();
+        basis_generator_H->writeSnapshot();
 
-
-
+        basis_generator_x->writeSnapshot();
 
         // Terminate the sampling and write out information.
         delete basis_generator_v;
         delete basis_generator_x;
         delete basis_generator_H;
     }
-
-    cout << 17 << endl;
 
     // 12. Save the displaced mesh, the velocity and elastic energy.
     {
@@ -998,18 +1005,16 @@ int main(int argc, char* argv[])
         w_gf.Save(ee_ofs);
     }
 
-    cout << 18 << endl;
-
     // 16. Free the used memory.
     delete ode_solver;
     delete pmesh;
     delete H_t;
+    delete v_W;
+    delete x_W;
 
     MPI_Finalize();
 
 
-
-    cout << 19 << endl;
 
     return 1;
 }
@@ -1055,7 +1060,8 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     Array<int>& ess_bdr, double visc,
     double mu, double K)
     : TimeDependentOperator(2 * f.TrueVSize(), 0.0), fespace(f),
-    M(&fespace), S(&fespace), H(&fespace),
+    //M(&fespace), S(&fespace), H(&fespace),
+    M(NULL), S(NULL), H(NULL),
     viscosity(visc), M_solver(f.GetComm()),
     z(height / 2)
 {
@@ -1064,10 +1070,12 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
 
     const double ref_density = 1.0; // density in the reference configuration
     ConstantCoefficient rho0(ref_density);
-    M.AddDomainIntegrator(new VectorMassIntegrator(rho0));
-    M.Assemble(skip_zero_entries);
-    M.Finalize(skip_zero_entries);
-    Mmat = M.ParallelAssemble();
+
+    M = new ParBilinearForm(&fespace);
+    M->AddDomainIntegrator(new VectorMassIntegrator(rho0));
+    M->Assemble(skip_zero_entries);
+    M->Finalize(skip_zero_entries);
+    Mmat = M->ParallelAssemble();
     fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
     HypreParMatrix* Me = Mmat->EliminateRowsCols(ess_tdof_list);
     delete Me;
@@ -1082,14 +1090,16 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     M_solver.SetOperator(*Mmat);
 
     model = new NeoHookeanModel(mu, K);
-    H.AddDomainIntegrator(new HyperelasticNLFIntegrator(model));
-    H.SetEssentialTrueDofs(ess_tdof_list);
+    H = new ParNonlinearForm(&fespace);
+    H->AddDomainIntegrator(new HyperelasticNLFIntegrator(model));
+    H->SetEssentialTrueDofs(ess_tdof_list);
 
     ConstantCoefficient visc_coeff(viscosity);
-    S.AddDomainIntegrator(new VectorDiffusionIntegrator(visc_coeff));
-    S.Assemble(skip_zero_entries);
-    S.Finalize(skip_zero_entries);
-    Smat = S.ParallelAssemble();
+    S = new ParBilinearForm(&fespace);
+    S->AddDomainIntegrator(new VectorDiffusionIntegrator(visc_coeff));
+    S->Assemble(skip_zero_entries);
+    S->Finalize(skip_zero_entries);
+    Smat = S->ParallelAssemble();
 
 }
 
@@ -1102,11 +1112,11 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
     Vector dv_dt(dvx_dt.GetData() + 0, sc);
     Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
-    H.Mult(x, z);
+    H->Mult(x, z);
 
     if (viscosity != 0.0)
     {
-        S.TrueAddMult(v, z);
+        S->TrueAddMult(v, z);
         z.SetSubVector(ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z
@@ -1125,12 +1135,12 @@ void HyperelasticOperator::GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& 
     Vector dv_dt(dvx_dt.GetData() + 0, sc);
     Vector dx_dt(dvx_dt.GetData() + sc, sc);
 
-    H.Mult(x, z);
+    H->Mult(x, z);
     H_new = z; // Store H for sampling
 
     if (viscosity != 0.0)
     {
-        S.TrueAddMult(v, z);
+        S->TrueAddMult(v, z);
         z.SetSubVector(ess_tdof_list, 0.0);
     }
     z.Neg(); // z = -z
@@ -1143,12 +1153,12 @@ void HyperelasticOperator::GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& 
 
 double HyperelasticOperator::ElasticEnergy(const ParGridFunction& x) const
 {
-    return H.GetEnergy(x);
+    return H->GetEnergy(x);
 }
 
 double HyperelasticOperator::KineticEnergy(const ParGridFunction& v) const
 {
-    double loc_energy = 0.5 * M.InnerProduct(v, v);
+    double loc_energy = 0.5 * M->InnerProduct(v, v);
     double energy;
     MPI_Allreduce(&loc_energy, &energy, 1, MPI_DOUBLE, MPI_SUM,
         fespace.GetComm());
@@ -1166,6 +1176,9 @@ HyperelasticOperator::~HyperelasticOperator()
 {
     delete model;
     delete Mmat;
+    delete M;
+    delete S;
+    delete H;
 }
 
 
@@ -1233,17 +1246,20 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     // Create M_hat
     M_hat = new CAROM::Matrix(rvdim, rvdim, false);
+    M_hat_inv = new CAROM::Matrix(rvdim, rvdim, false);
     Compute_CtAB(fom->Mmat, V_v, V_v, M_hat);
-    M_hat->inverse(M_hat_inv);
+    M_hat->inverse(*M_hat_inv);
 
 
     if (myid == 0)
     {
-        const int spdim = fomSp->Height();  // Reduced height
-        zH.SetSize(spdim / 2); // Samples of H
+        //const int spdim = fomSp->Height();  // Reduced height
+        // The line below was added to make the computations work.
+        // Unsure if it is wrong...
+        const int spdim = fom->Height(); // Unreduced height
 
-        // Set size of H storage vector
-        H_prev(spdim / 2);
+
+        zH.SetSize(spdim / 2); // Samples of H
 
         // Allocate auxillary vectors
         //z_x_librom = new CAROM::Vector(spdim / 2, false);
@@ -1347,7 +1363,9 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     // Hyperreduce H
     // Apply H to x to get zH
-    fomSp->H.Mult(*psp_x, zH);
+    // Here I replaced the original line as well...
+    //fomSp->H->Mult(*psp_x, zH);
+    fom->H->Mult(*psp_x, zH);
 
     // Sample the values from zH
     smm->GetSampledValues("X", zH, zN);
@@ -1404,11 +1422,11 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     add(z_v, v0, *pfom_v);
 
     // Apply H to x to get z
-    fom->H.Mult(*pfom_x, *zfom_x);
+    fom->H->Mult(*pfom_x, *zfom_x);
     V_x.transposeMult(*zfom_x_librom, z_librom); 
 
 
-    if (fomSp->viscosity != 0.0) 
+    if (fom->viscosity != 0.0) 
     {
         // Apply S^, the reduced S operator, to v
         S_hat->multPlus(*z_librom, v_librom, 1.0); 
