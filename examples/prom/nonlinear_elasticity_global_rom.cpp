@@ -792,17 +792,18 @@ int main(int argc, char* argv[])
         // Note that some of this could be done only on the ROM solver process, but it is tricky, since RomOperator assembles Bsp in parallel.
         wMFEM = new Vector(&((*w)(0)), rxdim + rvdim); 
 
-        // Get initial conditions
-        //Vector w_v0(wMFEM->GetData() + 0, rvdim);
-        //Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
 
+        // Initial condition hack
+        Vector*  w_v0 = 0;
+        Vector*  w_x0 = 0;
+       
         if (myid == 0)
         {
             //sp_XV_space = smm->GetSampleFESpace(FSPACE);
             sp_XV_space = smm->GetSampleFESpace(0);
 
             // Initialize sp_p with initial conditions.
-            {
+            //{
                 // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
                 //    boundary conditions on a beam-like mesh (see description above).
                 BlockVector sp_vx(true_offset);
@@ -820,7 +821,14 @@ int main(int argc, char* argv[])
 
                 sp_v_gf.SetFromTrueVector();
                 sp_x_gf.SetFromTrueVector();
-            }
+            //}
+
+             // Get initial conditions
+            //Vector w_v0(wMFEM->GetData() + 0, rvdim);
+            //Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
+            w_v0 = new Vector(sp_v_gf.GetTrueVector());
+            w_x0 = new Vector(sp_x_gf.GetTrueVector());
+
 
             // Define operator
             soper = new HyperelasticOperator(*sp_XV_space, ess_bdr, visc, mu, K);
@@ -829,7 +837,7 @@ int main(int argc, char* argv[])
 
 
 
-        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, *v_W, *x_W,
+        romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, *w_v0, *w_x0,
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
 
@@ -848,14 +856,10 @@ int main(int argc, char* argv[])
     }
     
 
-
-
     // 11. Perform time-integration
     //     (looping over the time iterations, ti, with a time-step dt).
     //     (taking samples and storing it into the pROM object)
     StopWatch fom_timer;
-    
-    cout << 11 << '\n';
 
     double t = 0.0;
     vector<double> ts;
@@ -888,11 +892,13 @@ int main(int argc, char* argv[])
 
             
             ode_solver->Step(vx, t, dt_real);
-            last_step = (t >= t_final - 1e-8 * dt);
+            
 
             fom_timer.Stop();
 
         }
+
+        last_step = (t >= t_final - 1e-8 * dt);
 
         if (offline)
         {
@@ -955,7 +961,6 @@ int main(int argc, char* argv[])
     }
 
 
-    cout << 12 << '\n';
 
     if (offline)
     {
@@ -1216,12 +1221,12 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     HyperelasticOperator* fomSp_, const int rxdim_, const int rvdim_, const int hdim_,
     CAROM::SampleMeshManager* smm_, const Vector x0_, const Vector v0_,
     const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
-    const CAROM::Matrix* Hsinv,
+    const CAROM::Matrix* Hsinv_,
     const int myid, const bool oversampling_)
     : TimeDependentOperator(rxdim_ + rvdim_, 0.0),
     fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_),
-    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(U_H_),
-    zN(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
+    smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(U_H_), Hsinv(Hsinv_),
+    zN(std::max(nsamp_H, 1), false), zX(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
     oversampling(oversampling_), z(height / 2)
 {
 
@@ -1230,7 +1235,6 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
         V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
 
-        
     }
 
     // Gather distributed vectors
@@ -1253,10 +1257,10 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     if (myid == 0)
     {
-        //const int spdim = fomSp->Height();  // Reduced height
+        const int spdim = fomSp->Height();  // Reduced height
         // The line below was added to make the computations work.
         // Unsure if it is wrong...
-        const int spdim = fom->Height(); // Unreduced height
+        //const int spdim = fom->Height(); // Unreduced height
 
 
         zH.SetSize(spdim / 2); // Samples of H
@@ -1276,7 +1280,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         z_v_librom = new CAROM::Vector(z_v.GetData(), z_v.Size(), false, false);
         z_x_librom = new CAROM::Vector(z_x.GetData(), z_x.Size(), false, false);
 
-      
+    
+        
         // This is for saving the recreated predictions
         psp_librom = new CAROM::Vector(spdim, false);
         psp = new Vector(&((*psp_librom)(0)), spdim);
@@ -1364,8 +1369,8 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     // Hyperreduce H
     // Apply H to x to get zH
     // Here I replaced the original line as well...
-    //fomSp->H->Mult(*psp_x, zH);
-    fom->H->Mult(*psp_x, zH);
+    fomSp->H->Mult(*psp_x, zH);
+    //fom->H->Mult(*psp_x, zH);
 
     // Sample the values from zH
     smm->GetSampledValues("X", zH, zN);
