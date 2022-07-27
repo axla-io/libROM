@@ -58,8 +58,9 @@ public:
     ParNonlinearForm* H;
     HyperelasticModel* model;
     mutable Vector z; // auxiliary vector
+    mutable Vector z2; // auxiliary vector
     HypreParMatrix* Mmat; // Mass matrix from ParallelAssemble()
-    HypreParMatrix* Smat; 
+    HypreParMatrix Smat; 
 
     virtual ~HyperelasticOperator();
 };
@@ -107,6 +108,9 @@ private:
 
 protected:
     CAROM::Matrix* S_hat;
+    CAROM::Vector* S_hat_v0;
+    Vector* S_hat_v0_temp;
+    CAROM::Vector* S_hat_v0_temp_librom;
     CAROM::Matrix* M_hat;
     CAROM::Matrix* M_hat_inv;
     
@@ -120,11 +124,12 @@ protected:
 
 public:
     HyperelasticOperator* fom;
+
     RomOperator(HyperelasticOperator* fom_,
-        HyperelasticOperator* fomSp_, const int rxdim_, const int rvdim_, const int hdim_,
-        CAROM::SampleMeshManager* smm_, const Vector x0_, const Vector v0_,
-        const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
-        const CAROM::Matrix* Hsinv,
+        HyperelasticOperator* fomSp_, const int rvdim_, const int rxdim_, const int hdim_,
+        CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_,
+        const CAROM::Matrix* V_v_, const CAROM::Matrix* V_x_, const CAROM::Matrix* U_H_,
+        const CAROM::Matrix* Hsinv_,
         const int myid, const bool oversampling_);
 
     virtual void Mult(const Vector& y, Vector& dy_dt) const;
@@ -297,15 +302,15 @@ int main(int argc, char* argv[])
     int par_ref_levels = 0;
     int order = 2;
     int ode_solver_type = 14;
-    double t_final = 60.0; // For debugging purposes
+    double t_final = 1.0; // For debugging purposes
     double dt = 0.03; // 0.03
-    double visc = 0.0; //1e-2;
+    double visc = 1e-2;
     double mu = 0.25;
     double K = 5.0;
     bool adaptive_lin_rtol = true;
     bool visualization = true;
     bool visit = false;
-    int vis_steps = 100; // Debug, for normal use it's supposed to be 1
+    int vis_steps = 1; // Debug, for normal use it's supposed to be 1
 
     // ROM parameters
     bool offline = false; // debug mode
@@ -880,7 +885,7 @@ int main(int argc, char* argv[])
 
         if (hypr_red)
         {
-            romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, *w_v0, *w_x0,
+            romop = new RomOperator(&oper, soper, rvdim, rxdim, hdim, smm, *w_v0, *w_x0,
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
         }
@@ -912,7 +917,7 @@ int main(int argc, char* argv[])
 
 
 
-            romop = new RomOperator(&oper, soper, rxdim, rvdim, hdim, smm, 
+            romop = new RomOperator(&oper, soper, rvdim, rxdim, hdim, smm, 
             vx0.GetBlock(0), vx0.GetBlock(1),
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
@@ -1256,7 +1261,7 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     //M(&fespace), S(&fespace), H(&fespace),
     M(NULL), S(NULL), H(NULL),
     viscosity(visc), M_solver(f.GetComm()),
-    z(height / 2)
+    z(height / 2), z2(height / 2)
 {
     const double rel_tol = 1e-8;
     const int skip_zero_entries = 0;
@@ -1293,7 +1298,8 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     S->AddDomainIntegrator(new VectorDiffusionIntegrator(visc_coeff));
     S->Assemble(skip_zero_entries);
     S->Finalize(skip_zero_entries);
-    Smat = S->ParallelAssemble();
+    //Smat = S->ParallelAssemble();
+    S->FormSystemMatrix(ess_tdof_list, Smat);
 
 }
 
@@ -1310,8 +1316,10 @@ void HyperelasticOperator::Mult(const Vector& vx, Vector& dvx_dt) const
 
     if (viscosity != 0.0)
     {
-        S->TrueAddMult(v, z);
-        z.SetSubVector(ess_tdof_list, 0.0);
+        //S->TrueAddMult(v, z);
+        //z.SetSubVector(ess_tdof_list, 0.0);
+        Smat.Mult(v, z2);
+        z += z2;
     }
     z.Neg(); // z = -z
     M_solver.Mult(z, dv_dt);
@@ -1334,8 +1342,10 @@ void HyperelasticOperator::GetH_dvxdt(const Vector& vx, Vector& dvx_dt, Vector& 
 
     if (viscosity != 0.0)
     {
-        S->TrueAddMult(v, z);
-        z.SetSubVector(ess_tdof_list, 0.0);
+        //S->TrueAddMult(v, z);
+        //z.SetSubVector(ess_tdof_list, 0.0);
+        Smat.Mult(v, z2);
+        z += z2;
     }
     z.Neg(); // z = -z
     M_solver.Mult(z, dv_dt);
@@ -1407,9 +1417,9 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 
 RomOperator::RomOperator(HyperelasticOperator* fom_,
-    HyperelasticOperator* fomSp_, const int rxdim_, const int rvdim_, const int hdim_,
+    HyperelasticOperator* fomSp_, const int rvdim_, const int rxdim_, const int hdim_,
     CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_,
-    const CAROM::Matrix* V_x_, const CAROM::Matrix* V_v_, const CAROM::Matrix* U_H_,
+    const CAROM::Matrix* V_v_, const CAROM::Matrix* V_x_, const CAROM::Matrix* U_H_,
     const CAROM::Matrix* Hsinv_,
     const int myid, const bool oversampling_)
     : TimeDependentOperator(rxdim_ + rvdim_, 0.0),
@@ -1421,8 +1431,8 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     if (myid == 0)
     {
-        V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
-        V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
+        V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
+        V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
 
     }
 
@@ -1435,7 +1445,14 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     // Create S_hat
     S_hat = new CAROM::Matrix(rvdim, rvdim, false);
-    Compute_CtAB(fom->Smat, V_v, V_v, S_hat); 
+    Compute_CtAB(&(fom->Smat), V_v, V_v, S_hat); 
+
+    // Apply S_hat to the initial velocity and store
+    S_hat_v0 = new CAROM::Vector(rvdim, false);
+    S_hat_v0_temp = new Vector(v0.Size());
+    S_hat_v0_temp_librom = new CAROM::Vector(S_hat_v0_temp->GetData(), S_hat_v0_temp->Size(), true, false);
+    fom->Smat.Mult(v0, *S_hat_v0_temp);
+    V_v.transposeMult(*S_hat_v0_temp_librom, S_hat_v0); 
 
     // Create M_hat
     M_hat = new CAROM::Matrix(rvdim, rvdim, false);
@@ -1601,7 +1618,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
     CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
-    CAROM::Vector dx_dt_librom(dx_dt.GetData(), rvdim, false, false);
+    CAROM::Vector dx_dt_librom(dx_dt.GetData(), rxdim, false, false);
 
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
@@ -1617,10 +1634,6 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
      fom->H->Mult(*pfom_x, *zfom_x);
     //fom->H->Mult(x0, *zfom_x);
 
-    
-    // *zfom_x = x0; // Change to just use x0 as input, where x 0 is the vector transformed by H.Mult
-
-
     V_v.transposeMult(*zfom_x_librom, z_librom); 
 
 
@@ -1628,7 +1641,8 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     {
         // Apply S^, the reduced S operator, to v
         S_hat->multPlus(*z_librom, v_librom, 1.0); 
-        z.SetSubVector(fom->ess_tdof_list, 0.0);
+        *z_librom += *S_hat_v0;
+        //z.SetSubVector(fom->ess_tdof_list, 0.0);
     }
 
     z.Neg(); // z = -z, because we are calculating the residual.
