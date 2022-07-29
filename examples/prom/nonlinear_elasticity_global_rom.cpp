@@ -38,7 +38,8 @@ protected:
     
 
 public:
-    HyperelasticOperator(ParFiniteElementSpace& f, Array<int>& ess_bdr,
+    //HyperelasticOperator(ParFiniteElementSpace& f, Array<int>& ess_bdr,
+    HyperelasticOperator(ParFiniteElementSpace& f, Array<int>& ess_tdof_list_,
         double visc, double mu, double K);
 
     /// Compute the right-hand side of the ODE system.
@@ -75,7 +76,8 @@ private:
     int nsamp_H;
     double current_dt;
     bool oversampling;
-    CAROM::Matrix* V_v_sp, * V_x_sp;
+    CAROM::Matrix* V_v_sp, * V_x_sp, * U_H_sp;
+    CAROM::Matrix* V_v_sp_dist;
     CAROM::Vector* psp_librom, * psp_x_librom, * psp_v_librom;
     Vector* psp;
     Vector* psp_x;
@@ -125,22 +127,22 @@ protected:
 public:
     HyperelasticOperator* fom;
 
+
     RomOperator(HyperelasticOperator* fom_,
-        HyperelasticOperator* fomSp_, const int rvdim_, const int rxdim_, const int hdim_,
-        CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_,
-        const CAROM::Matrix* V_v_, const CAROM::Matrix* V_x_, const CAROM::Matrix* U_H_,
-        const CAROM::Matrix* Hsinv_,
-        const int myid, const bool oversampling_);
+    HyperelasticOperator* fomSp_, const int rvdim_, const int rxdim_, const int hdim_,
+    CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_, const Vector v0_fom_,
+    const CAROM::Matrix* V_v_, const CAROM::Matrix* V_x_, const CAROM::Matrix* U_H_,
+    const CAROM::Matrix* Hsinv_,
+    const int myid, const bool oversampling_);
 
     virtual void Mult(const Vector& y, Vector& dy_dt) const;
     void Mult_Hyperreduced(const Vector& y, Vector& dy_dt) const;
     void Mult_FullOrder(const Vector& y, Vector& dy_dt) const;
-    void Mult_test(const Vector& vx, Vector& dvx_dt) const;
 
     void Compute_CtAB(const HypreParMatrix* A, const CAROM::Matrix& B, const CAROM::Matrix& C, CAROM::Matrix* CtAB);
 
     CAROM::Matrix V_v, V_x, V_vTU_H;
-    Vector x0, v0;
+    Vector x0, v0, v0_fom;
 
     virtual ~RomOperator();
 };
@@ -302,22 +304,22 @@ int main(int argc, char* argv[])
     int par_ref_levels = 0;
     int order = 2;
     int ode_solver_type = 14;
-    double t_final = 1.0; // For debugging purposes
+    double t_final = 15.0; // 40.0 For debugging purposes
     double dt = 0.03; // 0.03
-    double visc = 1e-2;
+    double visc = 0.0; //1e-2;
     double mu = 0.25;
     double K = 5.0;
     bool adaptive_lin_rtol = true;
     bool visualization = true;
     bool visit = false;
-    int vis_steps = 1; // Debug, for normal use it's supposed to be 1
+    int vis_steps = 50; // Debug, for normal use it's supposed to be 1
 
     // ROM parameters
     bool offline = false; // debug mode
     bool merge = false;
     bool online = false;
     bool use_sopt = false;
-    int num_samples_req = -1;
+    int num_samples_req = -1; // 1170 for comparison
 
     int nsets = 0;
 
@@ -552,6 +554,9 @@ int main(int argc, char* argv[])
     ess_bdr = 0;
     ess_bdr[0] = 1; // boundary attribute 1 (index 0) is fixed
 
+    Array<int> ess_tdof_list;
+    fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list); 
+
 
     // Store initial vx
     BlockVector vx0 = BlockVector(vx);
@@ -584,7 +589,7 @@ int main(int argc, char* argv[])
 
     // 9. Initialize the hyperelastic operator, the GLVis visualization and print
     //    the initial energies.
-    HyperelasticOperator oper(fespace, ess_bdr, visc, mu, K);
+    HyperelasticOperator oper(fespace, ess_tdof_list, visc, mu, K);
     HyperelasticOperator* soper = 0;
 
     // Fill dvdt and dxdt
@@ -654,18 +659,16 @@ int main(int argc, char* argv[])
 
 
     if (offline) {
-        CAROM::Options options_v(true_size, max_num_snapshots, 1,
-            update_right_SV);
-        CAROM::Options options_x(true_size, max_num_snapshots, 1,
-            update_right_SV);
+        CAROM::Options options(fespace.GetTrueVSize(), max_num_snapshots, 1,
+                                 update_right_SV);
 
-            basis_generator_v = new CAROM::BasisGenerator(options_v, isIncremental,
+            basis_generator_v = new CAROM::BasisGenerator(options, isIncremental,
                 basisFileName + "_V");
 
-            basis_generator_x = new CAROM::BasisGenerator(options_x, isIncremental,
+            basis_generator_x = new CAROM::BasisGenerator(options, isIncremental,
                 basisFileName + "_X");
 
-            basis_generator_H = new CAROM::BasisGenerator(options_v, isIncremental,
+            basis_generator_H = new CAROM::BasisGenerator(options, isIncremental,
                 basisFileName + "_H");
 
     }
@@ -678,8 +681,6 @@ int main(int argc, char* argv[])
     const CAROM::Matrix* H_librom = 0;
     const CAROM::Matrix* Hsinv = 0;
 
-    int nsamp_v = -1;
-    int nsamp_x = -1;
     int nsamp_H = -1;
 
     CAROM::SampleMeshManager* smm = nullptr;
@@ -733,6 +734,7 @@ int main(int argc, char* argv[])
         }
 
         MFEM_VERIFY(H_librom->numColumns() >= hdim, "");
+        //MFEM_VERIFY(FR_librom->numRows() == N1 && FR_librom->numColumns() >= nldim, "");
 
         if (H_librom->numColumns() > hdim)
             H_librom = GetFirstColumns(hdim, H_librom);
@@ -797,6 +799,7 @@ int main(int argc, char* argv[])
 
         smm = new CAROM::SampleMeshManager(spfespace);
 
+        vector<int> sample_dofs_empty;
         vector<int> num_sample_dofs_per_proc_empty;
         num_sample_dofs_per_proc_empty.assign(num_procs, 0);
 
@@ -806,13 +809,13 @@ int main(int argc, char* argv[])
         //     num_sample_dofs_per_proc);
         // smm->RegisterSampledVariable("H", FSPACE, sample_dofs,
         //     num_sample_dofs_per_proc); // NOTE: Probably not needed
-
+         
         smm->RegisterSampledVariable("V", 0, sample_dofs,
-            num_sample_dofs_per_proc); // NOTE: Probably not needed
+            num_sample_dofs_per_proc); 
         smm->RegisterSampledVariable("X", 0, sample_dofs,
             num_sample_dofs_per_proc);
         smm->RegisterSampledVariable("H", 0, sample_dofs,
-            num_sample_dofs_per_proc); // NOTE: Probably not needed
+            num_sample_dofs_per_proc); 
 
         smm->ConstructSampleMesh();
 
@@ -840,20 +843,28 @@ int main(int argc, char* argv[])
         // Initial condition hack
         Vector*  w_v0 = 0;
         Vector*  w_x0 = 0;
+        
        
         if (myid == 0)
         {
             //sp_XV_space = smm->GetSampleFESpace(FSPACE);
             sp_XV_space = smm->GetSampleFESpace(0);
 
+            int sp_size = sp_XV_space->TrueVSize();
+            Array<int> sp_offset(3);
+            sp_offset[0] = 0;
+            sp_offset[1] = sp_size;
+            sp_offset[2] = 2 * sp_size;
+
             // Initialize sp_p with initial conditions.
+            BlockVector sp_vx(sp_offset); 
+            ParGridFunction sp_v_gf, sp_x_gf;
             //{
                 // 8. Set the initial conditions for v_gf, x_gf and vx, and define the
                 //    boundary conditions on a beam-like mesh (see description above).
-                BlockVector sp_vx(true_offset);
-                ParGridFunction sp_v_gf, sp_x_gf;
-                sp_v_gf.MakeTRef(sp_XV_space, sp_vx, true_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction.
-                sp_x_gf.MakeTRef(sp_XV_space, sp_vx, true_offset[1]);
+                
+                sp_v_gf.MakeTRef(sp_XV_space, sp_vx, sp_offset[0]); // Associate a new FiniteElementSpace and new true-dof data with the GridFunction.
+                sp_x_gf.MakeTRef(sp_XV_space, sp_vx, sp_offset[1]);
 
 
                 VectorFunctionCoefficient velo(dim, InitialVelocity);
@@ -872,61 +883,194 @@ int main(int argc, char* argv[])
             //Vector w_x0(wMFEM->GetData() + rvdim, rxdim);
             w_v0 = new Vector(sp_v_gf.GetTrueVector());
             w_x0 = new Vector(sp_x_gf.GetTrueVector());
-            *w_v0 = 0.0;
-            *w_x0 = 0.0;
+            //*w_v0 = 0.0;
+            //*w_x0 = 0.0;
+
+            
+
+            /*
+           // Convert essential boundary list to binary list
+           // Read all boundary vertices in mesh, set 1 if attribute is 1, 0 otherwise
+
+           // Get original mesh
+           Mesh* mesh_read = fespace.GetMesh();
+
+            // Get sample mesh
+           Mesh* mesh_sp = sp_XV_space->GetMesh();
 
 
-            // Define operator
-            soper = new HyperelasticOperator(*sp_XV_space, ess_bdr, visc, mu, K);
+            // Loop through mesh
+            Element* bdr_elem = 0;
+            Element* bdr_elem_sp = 0;
+            Array<int> elem_vtx(2);
+            Array<int> elem_vtx_sp(2);
+            cout<<"Number of boundary elems, original mesh: "<<mesh_read->GetNBE()<< '\n';
+            int attr = 0;
+            
+            // For each element int main mesh
+           for (size_t i = 0; i < mesh_read->GetNBE(); i++)
+           {
+            // Get element
+            bdr_elem = mesh_read->GetBdrElement(i);
+
+            // Get attribute
+            attr = bdr_elem->GetAttribute();
+
+            // If attribute is essential
+            if (attr == 1)
+            {
+                // Get element vertices
+                bdr_elem->GetVertices(elem_vtx);
+
+                    // For each element in sample mesh
+                    for (size_t j = 0; j < mesh_read->GetNBE(); j++)
+                    {
+                        // Get sample element
+                        bdr_elem_sp = mesh_sp->GetBdrElement(j);
+
+                        // Get sample element vertices
+                        bdr_elem_sp->GetVertices(elem_vtx_sp);
+
+                        // If vertices are the same
+                        if ((elem_vtx_sp[0] == elem_vtx[0] && elem_vtx_sp[1] == elem_vtx[1])||(elem_vtx_sp[1] == elem_vtx[0] && elem_vtx_sp[0] == elem_vtx[1]))
+                        {
+                            // Set attribute to be essential
+                            bdr_elem_sp->SetAttribute(2);
+                        }
+                        
+                    }
+   
+            }
+            */
+
+           /*  cout<<"Main Elem "<< i << " vertex 1: " << elem_vtx[0] << " vertex 2: "<< elem_vtx[1]<< '\n';
+            cout<<"Sample Elem "<< i << " vertex 1: " << elem_vtx_sp[0] << " vertex 2: "<< elem_vtx_sp[1]<< '\n';
+            cout<< '\n'; */
+            /*
+            attr = bdr_elem->GetAttribute();
+            //cout<<"Main Elem "<< i << " attribute: " << attr << '\n';
+            //cout<<"Sample Elem original "<< i << " attribute: " << bdr_elem_sp->GetAttribute()<< '\n';
+
+            
+            
+            //bdr_elem_sp->SetAttribute(attr);
+            cout<<"Sample Elem new "<< i << " attribute: " << bdr_elem_sp->GetAttribute()<< '\n';
+            cout<< '\n';
+            */
+          // }
+
+           
+           
+           //mesh_sp->SetAttributes();
+            
+
+           // Breakpoint here somewhere
+           
+
+
+           // Loop through binary list and set boundary attribute to 1 if in, else 0.
+           // Perform step inbetween (converting binary essential boundary list to sample space)
+           cout<<"Binary list"<< '\n';
+            CAROM::Matrix Ess_mat(true_size, 1, true);
+            for (size_t i = 0; i < true_size; i++)
+            {
+                Ess_mat(i,0) = 0;
+                for (size_t j = 0; j < ess_tdof_list.Size(); j++)
+                {
+                    if (ess_tdof_list[j] == i )
+                    {
+                        Ess_mat(i,0) = 1;
+                    }
+                    
+                }
+
+                //cout<<"i: "<< i << " attribute: " << Ess_mat(i,0)<< '\n';
+            }
+
+            CAROM::Matrix Ess_mat_sp(sp_size, 1, false);
+
+            // b here
+
+            smm->GatherDistributedMatrixRows("X", Ess_mat, 1, Ess_mat_sp);
+
+            /* cout<<"Original list"<< '\n';
+            for (size_t j = 0; j < ess_tdof_list.Size(); j++)
+                {
+                    cout<<ess_tdof_list[j]<< '\n';
+                    
+                } */
+
+            // Count number of true elements in new matrix
+            int num_ess_sp = 0;
+
+            for (size_t i = 0; i < sp_size; i++)
+            {
+                if (Ess_mat_sp(i,0) == 1)
+                {
+                    num_ess_sp += 1;
+                }
+                
+            }
+            
+
+            // Initialize list
+            Array<int> ess_tdof_list_sp(num_ess_sp);
+
+
+            // Add indices to list
+            int ctr = 0;
+            for (size_t i = 0; i < sp_size; i++)
+            {
+                if (Ess_mat_sp(i,0) == 1)
+                {
+                    ess_tdof_list_sp[ctr] = i;
+                    ctr += 1;
+                }
+                
+            }
+            
+
+        // Set essential conditions
+        /*
+        Array<int> ess_bdr_sp(sp_XV_space->GetMesh()->bdr_attributes.Max());
+        ess_bdr_sp = 0;
+        //ess_bdr_sp[0] = 1; // boundary attribute 1 (index 0) is fixed
+        ess_bdr_sp[1] = 1; // boundary attribute 2 (index 1) is fixed
+
+        */
+
+        // Define operator
+        //soper = new HyperelasticOperator(*sp_XV_space, ess_bdr_sp, visc, mu, K);
+        soper = new HyperelasticOperator(*sp_XV_space, ess_tdof_list_sp, visc, mu, K); 
 
         }
 
-        bool hypr_red = false; // debug
+        bool hyperreduce = true; // debug
 
-        if (hypr_red)
-        {
-            romop = new RomOperator(&oper, soper, rvdim, rxdim, hdim, smm, *w_v0, *w_x0,
+        if (hyperreduce)
+        {   // Change class
+            romop = new RomOperator(&oper, soper, rvdim, rxdim, hdim, smm, 
+            *w_v0, *w_x0, vx0.GetBlock(0),
+            //romop = new RomOperator(&oper, &oper, rvdim, rxdim, hdim, smm,
+            //vx0.GetBlock(0), vx0.GetBlock(1), vx0.GetBlock(0),
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
+            //Hsinv, myid, true); 
         }
         else
         {
-            // Change in constructor so that it does not apply the initial conditions
-            *v_W = 0.0;
-            *x_W = 0.0;
-
-
-
-                Vector test_x(vx0.GetBlock(1));
-
-                /*
-                oper.H->Mult(vx0.GetBlock(1), test_x);
-                cout << "xtest 1 = " << test_x.Elem(10)<< '\n';
-                */
-
-               
-
-
-                /*
-                test_x = vx0.GetBlock(1);
-
-                romop->fom->H->Mult(vx0.GetBlock(1), test_x);
-                cout << "xtest 1 = " << test_x.Elem(10)<< '\n';
-                */
-
-
-
-
+                      
+            // Change class
             romop = new RomOperator(&oper, soper, rvdim, rxdim, hdim, smm, 
-            vx0.GetBlock(0), vx0.GetBlock(1),
+            vx0.GetBlock(0), vx0.GetBlock(1), vx0.GetBlock(0),
             BV_librom, BX_librom, H_librom, 
             Hsinv, myid, num_samples_req != -1); 
 
-            romop->Mult_test(vx0.GetBlock(1), test_x);
-                cout << "xtest 1 = " << test_x.Elem(10)<< '\n';
         }
         
-        
+        // REMOVE?
+        *v_W = 0.0;
+        *x_W = 0.0;
 
             // Display lifted initial energies
             BroadcastUndistributedRomVector(w);
@@ -1051,7 +1195,7 @@ int main(int argc, char* argv[])
             {
                 basis_generator_x->takeSample(vx_diff.GetBlock(1), t, dt);
                 basis_generator_x->computeNextSampleTime(vx_diff.GetBlock(1) , dxdt.GetData(), t);
-
+                
             }
         }
         
@@ -1255,9 +1399,9 @@ void visualize(ostream& out, ParMesh* mesh, ParGridFunction* deformed_nodes,
 
 
 HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
-    Array<int>& ess_bdr, double visc,
+    Array<int>& ess_tdof_list_, double visc,
     double mu, double K)
-    : TimeDependentOperator(2 * f.TrueVSize(), 0.0), fespace(f),
+    : TimeDependentOperator(2 * f.TrueVSize(), 0.0), fespace(f),ess_tdof_list(ess_tdof_list_),
     //M(&fespace), S(&fespace), H(&fespace),
     M(NULL), S(NULL), H(NULL),
     viscosity(visc), M_solver(f.GetComm()),
@@ -1274,7 +1418,7 @@ HyperelasticOperator::HyperelasticOperator(ParFiniteElementSpace& f,
     M->Assemble(skip_zero_entries);
     M->Finalize(skip_zero_entries);
     Mmat = M->ParallelAssemble();
-    fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
+    //fespace.GetEssentialTrueDofs(ess_bdr, ess_tdof_list); 
     HypreParMatrix* Me = Mmat->EliminateRowsCols(ess_tdof_list);
     delete Me;
 
@@ -1418,12 +1562,12 @@ void InitialVelocity(const Vector& x, Vector& v)
 
 RomOperator::RomOperator(HyperelasticOperator* fom_,
     HyperelasticOperator* fomSp_, const int rvdim_, const int rxdim_, const int hdim_,
-    CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_,
+    CAROM::SampleMeshManager* smm_, const Vector v0_, const Vector x0_, const Vector v0_fom_,
     const CAROM::Matrix* V_v_, const CAROM::Matrix* V_x_, const CAROM::Matrix* U_H_,
     const CAROM::Matrix* Hsinv_,
     const int myid, const bool oversampling_)
     : TimeDependentOperator(rxdim_ + rvdim_, 0.0),
-    fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_),
+    fom(fom_), fomSp(fomSp_), rxdim(rxdim_), rvdim(rvdim_), hdim(hdim_), x0(x0_), v0(v0_), v0_fom(v0_fom_),
     smm(smm_), nsamp_H(smm_->GetNumVarSamples("H")), V_x(*V_x_), V_v(*V_v_), U_H(U_H_), Hsinv(Hsinv_),
     zN(std::max(nsamp_H, 1), false), zX(std::max(nsamp_H, 1), false), M_hat_solver(fom_->fespace.GetComm()),
     oversampling(oversampling_), z(height / 2)
@@ -1433,35 +1577,45 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     {
         V_v_sp = new CAROM::Matrix(fomSp->Height() / 2, rvdim, false);
         V_x_sp = new CAROM::Matrix(fomSp->Height() / 2, rxdim, false);
-
+        U_H_sp = new CAROM::Matrix(fomSp->Height() / 2, hdim, false);
     }
+
+
+    hyperreduce = true; // Debug mode
+
 
     // Gather distributed vectors
     smm->GatherDistributedMatrixRows("V", V_v, rvdim, *V_v_sp);
     smm->GatherDistributedMatrixRows("X", V_x, rxdim, *V_x_sp);
+    smm->GatherDistributedMatrixRows("H", *U_H, hdim, *U_H_sp);
+
 
     // Create V_vTU_H, for hyperreduction
     V_v.transposeMult(*U_H, V_vTU_H);
+    //V_v_sp->transposeMult(*U_H_sp, V_vTU_H);
 
-    // Create S_hat
     S_hat = new CAROM::Matrix(rvdim, rvdim, false);
+    S_hat_v0 = new CAROM::Vector(rvdim, false);
+    S_hat_v0_temp = new Vector(v0_fom.Size());
+    S_hat_v0_temp_librom = new CAROM::Vector(S_hat_v0_temp->GetData(), S_hat_v0_temp->Size(), true, false);
+    M_hat = new CAROM::Matrix(rvdim, rvdim, false);
+    M_hat_inv = new CAROM::Matrix(rvdim, rvdim, false);
+    
+    // Create S_hat
     Compute_CtAB(&(fom->Smat), V_v, V_v, S_hat); 
 
     // Apply S_hat to the initial velocity and store
-    S_hat_v0 = new CAROM::Vector(rvdim, false);
-    S_hat_v0_temp = new Vector(v0.Size());
-    S_hat_v0_temp_librom = new CAROM::Vector(S_hat_v0_temp->GetData(), S_hat_v0_temp->Size(), true, false);
-    fom->Smat.Mult(v0, *S_hat_v0_temp);
+    fom->Smat.Mult(v0_fom, *S_hat_v0_temp);
     V_v.transposeMult(*S_hat_v0_temp_librom, S_hat_v0); 
 
     // Create M_hat
-    M_hat = new CAROM::Matrix(rvdim, rvdim, false);
-    M_hat_inv = new CAROM::Matrix(rvdim, rvdim, false);
     Compute_CtAB(fom->Mmat, V_v, V_v, M_hat);
+
+    // Invert M_hat and store
     M_hat->inverse(*M_hat_inv);
 
-
-    if (myid == 0)
+    //if (myid == 0)
+    if (hyperreduce)
     {
         const int spdim = fomSp->Height();  // Reduced height
 
@@ -1496,8 +1650,6 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
 
     }
 
-    hyperreduce = false; // Debug mode
-
     if (!hyperreduce)
     {
         const int fdim = fom->Height(); // Unreduced height
@@ -1514,7 +1666,6 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
         pfom = new Vector(&((*pfom_librom)(0)), fdim);
 
         // Define sub-vectors of pfom.
-        
         pfom_x = new Vector(pfom->GetData(), fdim / 2);
         pfom_v = new Vector(pfom->GetData() + fdim / 2, fdim / 2);
         zfom_x = new Vector(fdim / 2);
@@ -1543,8 +1694,6 @@ RomOperator::~RomOperator()
 
 void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 {
-    // TODO: Match with below
-
     // Check that the sizes match
     MFEM_VERIFY(vx.Size() == rvdim + rxdim && dvx_dt.Size() == rvdim + rxdim, "");
 
@@ -1556,26 +1705,72 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
     Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
     CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
+    CAROM::Vector dx_dt_librom(dx_dt.GetData(), rxdim, false, false);
 
+    
+    /* cout<<"x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<x_librom.item(i)<<'\n';
+    }
+
+    cout<<"v_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<v_librom.item(i)<<'\n';
+    }  */
+    
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
-
-    /* V_v_sp->mult(v_librom, *z_v_librom); 
+    V_v_sp->mult(v_librom, *z_v_librom); 
     V_x_sp->mult(x_librom, *z_x_librom);
 
-    add(z_x, x0, *psp_x); // Store liftings
-    add(z_v, v0, *psp_v); */
+    /* cout<<"z_v_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_v_librom->item(i)<<'\n';
+    }
 
-    V_v_sp->mult(v_librom, *psp_v_librom); 
-    V_x_sp->mult(x_librom, *psp_x_librom);
+    cout<<"z_x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_x_librom->item(i)<<'\n';
+    }  */
 
+    add(z_v, v0, *psp_v); // Store liftings
+    add(z_x, x0, *psp_x); 
+
+   /*  cout<<"psp_v contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<psp_v_librom->item(i)<<'\n';
+    }
+
+    cout<<"psp_x contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<psp_x_librom->item(i)<<'\n';
+    }  */
 
     // Hyperreduce H
     // Apply H to x to get zH
     fomSp->H->Mult(*psp_x, zH);
+    //fom->H->Mult(*psp_x, zH);
+
+    /* cout<<"zH contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<zH.Elem(i)<<'\n';
+    }  */
 
     // Sample the values from zH
-    smm->GetSampledValues("X", zH, zN);
+    smm->GetSampledValues("H", zH, zN);
+
+    /* cout<<"zN contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<zN.item(i)<<'\n';
+    }  */
 
     // Apply inverse H-basis
     if (oversampling)
@@ -1586,21 +1781,63 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
     {
         Hsinv->mult(zN, zX);
     }
+/* 
+    cout<<"zX contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<zX.item(i)<<'\n';
+    }  */
 
+    //cout<<"This should be same as zN:"<<'\n';
+    //CAROM::Vector test_zX(zX.getData(), zX.dim(), false, true);
+    //CAROM::Vector test_zN(zN.getData(), zN.dim(), true, true);
+    //U_H->mult(test_zX, test_zN);
+
+
+   /*  for (size_t i = 0; i < 25; i++)
+    {
+        cout<<test_zN.item(i)<<'\n';
+    } 
+ */
     // Multiply by V_v^T * U_H
     V_vTU_H.mult(zX, z_librom);
 
+    /* 
+     cout<<"z_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_librom->item(i)<<'\n';
+    }  */
+    
 
     if (fomSp->viscosity != 0.0)
     {
         // Apply S^, the reduced S operator, to v
         S_hat->multPlus(*z_librom, v_librom, 1.0); 
-        z.SetSubVector(fomSp->ess_tdof_list, 0.0);
+        *z_librom += *S_hat_v0;
+        //z.SetSubVector(fomSp->ess_tdof_list, 0.0);
     }
+
     z.Neg(); // z = -z, because we are calculating the residual.
     M_hat_inv->mult(*z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
 
-    dx_dt = v;
+    V_x_sp->transposeMult(*psp_v_librom, dx_dt_librom);
+
+    /* 
+    cout<<"dv_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<dv_dt_librom.item(i)<<'\n';
+    }
+   
+
+   
+    cout<<"dx_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<dx_dt_librom.item(i)<<'\n';
+    } 
+     */
 }
 
 
@@ -1620,22 +1857,74 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
     CAROM::Vector dx_dt_librom(dx_dt.GetData(), rxdim, false, false);
 
+
+    
+    /* cout<<"x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<x_librom.item(i)<<'\n';
+    }
+
+    cout<<"v_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<v_librom.item(i)<<'\n';
+    }  */
+    
+
     // Lift the x-, and v-vectors
     // I.e. perform v = v0 + V_v v^, where v^ is the input
     V_x.mult(x_librom, *z_x_librom); 
     V_v.mult(v_librom, *z_v_librom); 
 
+    /* cout<<"z_v_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_v_librom->item(i)<<'\n';
+    }
+
+    cout<<"z_x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_x_librom->item(i)<<'\n';
+    }  */
 
     add(z_x, x0, *pfom_x); // Store liftings
     add(z_v, v0, *pfom_v);
 
+    /* cout<<"pfom_v_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<pfom_v_librom->item(i)<<'\n';
+    } 
+
+    cout<<"pfom_x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<pfom_x_librom->item(i)<<'\n';
+    }  */
 
     // Apply H to x to get z
      fom->H->Mult(*pfom_x, *zfom_x);
     //fom->H->Mult(x0, *zfom_x);
 
+    /* cout<<"zfom_x_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<zfom_x_librom->item(i)<<'\n';
+    }  */
+
+    
+
     V_v.transposeMult(*zfom_x_librom, z_librom); 
 
+    
+    /*  cout<<"z_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<z_librom->item(i)<<'\n';
+    } 
+     */
 
     if (fom->viscosity != 0.0) 
     {
@@ -1647,8 +1936,25 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
 
     z.Neg(); // z = -z, because we are calculating the residual.
     M_hat_inv->mult(*z_librom, dv_dt_librom); // to invert reduced mass matrix operator.
+    
 
     V_x.transposeMult(*pfom_v_librom, dx_dt_librom);
+
+
+   
+    /* cout<<"dv_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<dv_dt_librom.item(i)<<'\n';
+    }
+   
+
+   
+    cout<<"dx_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < 25; i++)
+    {
+        cout<<dx_dt_librom.item(i)<<'\n';
+    }  */
 
 }
 
@@ -1660,37 +1966,6 @@ void RomOperator::Mult(const Vector& vx, Vector& dvx_dt) const
         Mult_FullOrder(vx, dvx_dt);
 }
 
-
-
-void RomOperator::Mult_test(const Vector& vx, Vector& dvx_dt) const
-{
-    /*
-     // Create views to the sub-vectors v, x of vx, and dv_dt, dx_dt of dvx_dt
-    Vector v(vx.GetData() + 0, rvdim);
-    //Vector x(vx.GetData() + rvdim, rxdim);
-    CAROM::Vector v_librom(vx.GetData(), rvdim, false, false);
-    CAROM::Vector x_librom(vx.GetData() + rvdim, rxdim, false, false);
-    Vector dv_dt(dvx_dt.GetData() + 0, rvdim);
-    Vector dx_dt(dvx_dt.GetData() + rvdim, rxdim);
-    CAROM::Vector dv_dt_librom(dv_dt.GetData(), rvdim, false, false);
-    CAROM::Vector dx_dt_librom(dx_dt.GetData(), rvdim, false, false);
-
-    // Lift the x-, and v-vectors
-    // I.e. perform v = v0 + V_v v^, where v^ is the input
-    V_x.mult(x_librom, *z_x_librom); 
-    V_v.mult(v_librom, *z_v_librom); 
-
-
-    add(z_x, x0, *pfom_x); // Store liftings
-    add(z_v, v0, *pfom_v);
-    */
-
-
-    fom->H->Mult(x0, *zfom_x);
-    CAROM::Vector dvx_dt_librom(dvx_dt.GetData(), rvdim, false, false);
-    V_v.transposeMult(*zfom_x_librom, dvx_dt_librom); 
-
-}
 
 void RomOperator::Compute_CtAB(const HypreParMatrix* A,
     const CAROM::Matrix& B,  // Distributed matrix.
