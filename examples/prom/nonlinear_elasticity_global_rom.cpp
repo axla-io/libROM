@@ -306,7 +306,7 @@ int main(int argc, char* argv[])
     int ode_solver_type = 14;
     double t_final = 15.0; // 40.0 For debugging purposes
     double dt = 0.03; // 0.03
-    double visc = 0.0; //1e-2;
+    double visc = 1e-2;
     double mu = 0.25;
     double K = 5.0;
     bool adaptive_lin_rtol = true;
@@ -1045,7 +1045,7 @@ int main(int argc, char* argv[])
 
         }
 
-        bool hyperreduce = true; // debug
+        bool hyperreduce = false; // debug
 
         if (hyperreduce)
         {   // Change class
@@ -1265,7 +1265,10 @@ int main(int argc, char* argv[])
 
     }
 
+    ostringstream velo_name, pos_name;
 
+    velo_name << "velocity." << setfill('0') << setw(6) << myid;
+    pos_name << "position." << setfill('0') << setw(6) << myid;
 
     if (offline)
     {
@@ -1287,51 +1290,18 @@ int main(int argc, char* argv[])
         delete basis_generator_v;
         delete basis_generator_x;
         delete basis_generator_H;
-    }
 
-    // 12. Save the displaced mesh, the velocity and elastic energy.
-    {
+//    }
+// CHange
+//    {
 
-        if (online)
-        {
-            BroadcastUndistributedRomVector(w);
-
-            for (int i=0; i<rvdim; ++i)
-                (*w_v)(i) = (*w)(i);
-                
-            for (int i=0; i<rxdim; ++i)
-                (*w_x)(i) = (*w)(rvdim + i);
-
-
-
-           romop->V_v.mult(*w_v, *v_W_librom); 
-           romop->V_x.mult(*w_x, *x_W_librom); 
-
-           v_rec = *v_W;
-            x_rec = *x_W;
-
-             v_rec += vx0.GetBlock(0);
-           x_rec += vx0.GetBlock(1);
-
-            v_gf.SetFromTrueDofs(v_rec);
-            x_gf.SetFromTrueDofs(x_rec);
-                
-        }
-        else
-        {
-            v_gf.SetFromTrueVector();
-            x_gf.SetFromTrueVector();
-
-        }
-        
-        
+        // 12. Save the displaced mesh, the velocity and elastic energy.
         GridFunction* nodes = &x_gf;
         int owns_nodes = 0;
         pmesh->SwapNodes(nodes, owns_nodes);
 
-        ostringstream mesh_name, velo_name, ee_name;
+        ostringstream mesh_name, ee_name;
         mesh_name << "deformed." << setfill('0') << setw(6) << myid;
-        velo_name << "velocity." << setfill('0') << setw(6) << myid;
         ee_name << "elastic_energy." << setfill('0') << setw(6) << myid;
 
         ofstream mesh_ofs(mesh_name.str().c_str());
@@ -1339,13 +1309,98 @@ int main(int argc, char* argv[])
         pmesh->Print(mesh_ofs);
         pmesh->SwapNodes(nodes, owns_nodes);
         ofstream velo_ofs(velo_name.str().c_str());
-        velo_ofs.precision(8);
-        v_gf.Save(velo_ofs);
+        velo_ofs.precision(16);
+        //v_gf.Save(velo_ofs);
+
+        Vector v_final(vx.GetBlock(0));
+        for (int i = 0; i < v_final.Size(); ++i)
+        {
+            velo_ofs << v_final[i] << std::endl;
+        }
+
+        
+        ofstream pos_ofs(pos_name.str().c_str());
+        pos_ofs.precision(16);
+        //x_gf.Save(pos_ofs);
+
+        Vector x_final(vx.GetBlock(1));
+        for (int i = 0; i < x_final.Size(); ++i)
+        {
+            pos_ofs << x_final[i] << std::endl;
+        }
+
         ofstream ee_ofs(ee_name.str().c_str());
         ee_ofs.precision(8);
         oper.GetElasticEnergyDensity(x_gf, w_gf);
         w_gf.Save(ee_ofs);
+
     }
+
+//bool test_this = false;
+    // 15. Calculate the relative error between the ROM final solution and the true solution.
+    //if (test_this)
+
+    if (online)
+    {
+        // Initialize FOM solution
+        Vector v_fom(v_rec.Size());
+        Vector x_fom(x_rec.Size());
+
+        ifstream fom_v_file, fom_x_file;
+
+        // Open and load file
+        fom_v_file.open(velo_name.str().c_str());
+        fom_x_file.open(pos_name.str().c_str());
+
+        v_fom.Load(fom_v_file, v_rec.Size());
+        x_fom.Load(fom_x_file, x_rec.Size());
+
+        fom_v_file.close();
+        fom_x_file.close();
+
+
+        
+        //for (size_t i = 0; i < x_rec.Size(); i++)
+        //{
+           /* cout << "X Difference: " << diff_x[i] <<
+                    "    X FOM value: " << x_fom[i] << endl;
+                    */
+            /* cout << "X ROM prediction: " << x_rec[i] <<
+                    "    X FOM value: " << x_fom[i] << endl; */
+
+        //}
+        
+
+        
+        // Get difference vector
+        Vector diff_v(v_rec.Size());
+        Vector diff_x(x_rec.Size());
+
+        subtract(v_rec, v_fom, diff_v);
+        subtract(x_rec, x_fom, diff_x);
+
+        // Get norms
+        double tot_diff_norm_v = sqrt(InnerProduct(MPI_COMM_WORLD, diff_v, diff_v));
+        double tot_diff_norm_x = sqrt(InnerProduct(MPI_COMM_WORLD, diff_x, diff_x));
+
+        double tot_v_fom_norm = sqrt(InnerProduct(MPI_COMM_WORLD,
+                                            v_fom, v_fom));
+        double tot_x_fom_norm = sqrt(InnerProduct(MPI_COMM_WORLD,
+                                            x_fom, x_fom));
+
+
+
+        if (myid == 0)
+        {
+            cout << "Relative error of ROM position (x) at t_final: " << t_final <<
+                    " is " << tot_diff_norm_x / tot_x_fom_norm << endl;
+            cout << "Relative error of ROM velocity (v) at t_final: " << t_final <<
+                    " is " << tot_diff_norm_v / tot_v_fom_norm << endl;
+        }
+    }
+    
+    
+
 
     // 16. Free the used memory.
     delete ode_solver;
@@ -1581,7 +1636,7 @@ RomOperator::RomOperator(HyperelasticOperator* fom_,
     }
 
 
-    hyperreduce = true; // Debug mode
+    hyperreduce = false; // Debug mode
 
 
     // Gather distributed vectors
@@ -1823,21 +1878,9 @@ void RomOperator::Mult_Hyperreduced(const Vector& vx, Vector& dvx_dt) const
 
     V_x_sp->transposeMult(*psp_v_librom, dx_dt_librom);
 
-    /* 
-    cout<<"dv_dt_librom contents:"<<'\n';
-    for (size_t i = 0; i < 25; i++)
-    {
-        cout<<dv_dt_librom.item(i)<<'\n';
-    }
    
-
-   
-    cout<<"dx_dt_librom contents:"<<'\n';
-    for (size_t i = 0; i < 25; i++)
-    {
-        cout<<dx_dt_librom.item(i)<<'\n';
-    } 
-     */
+    
+     
 }
 
 
@@ -1955,6 +1998,23 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     {
         cout<<dx_dt_librom.item(i)<<'\n';
     }  */
+
+
+    cout<<"dv_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < dv_dt_librom.dim(); i++)
+    {
+        cout<<dv_dt_librom.item(i)<<'\n';
+    }
+   
+
+   
+    cout<<"dx_dt_librom contents:"<<'\n';
+    for (size_t i = 0; i < dx_dt_librom.dim(); i++)
+    {
+        cout<<dx_dt_librom.item(i)<<'\n';
+    } 
+
+    // B here
 
 }
 
