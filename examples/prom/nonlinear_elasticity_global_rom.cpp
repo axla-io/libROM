@@ -2000,6 +2000,8 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     }  */
 
 
+    /*
+
     cout<<"dv_dt_librom contents:"<<'\n';
     for (size_t i = 0; i < dv_dt_librom.dim(); i++)
     {
@@ -2013,6 +2015,7 @@ void RomOperator::Mult_FullOrder(const Vector& vx, Vector& dvx_dt) const
     {
         cout<<dx_dt_librom.item(i)<<'\n';
     } 
+    */
 
     // B here
 
